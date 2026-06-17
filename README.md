@@ -2,10 +2,28 @@
 
 Beginner-friendly guide for creating:
 
-1. A vertical 9:16 Instagram Stories collage from all photos in `photos/`.
-2. A vertical Reel-style zoom video from that collage.
+1. A vertical 9:16 collage from all photos in `photos/`.
+2. A vertical zoom video from that collage.
 
 The project runs from the terminal. Every source photo is used exactly once.
+
+## Two Versions: Python and C
+
+This toolkit comes in two versions that do exactly the same thing and produce
+the same result:
+
+- **Python version** — works on every operating system. **Windows users must use
+  this version.**
+- **C version** — a faster build for **macOS and Linux only**. It uses all of your
+  computer's CPU cores, so large collages and videos finish sooner. It does
+  **not** run on Windows.
+
+What to do:
+
+- **On Windows:** follow the Python instructions below and skip the C section.
+- **On macOS or Linux:** you can use either one. Start with Python if you just
+  want it to work; switch to the C version (the section "Faster Version In C")
+  when you want it to be faster.
 
 ## What You Need
 
@@ -173,6 +191,22 @@ Supported formats:
 - `.png`
 - `.webp`
 - `.heic` / `.heif`
+
+## Choose Your Version (Python or C)
+
+Everything up to this point — installing the tools, downloading the project, and
+adding your photos — is the same for everyone. **From here the guide splits in
+two. Follow only one path:**
+
+- 🐍 **To use the Python version** (works everywhere, and the only option on
+  **Windows**): **keep reading the next section** ("Setup On macOS" / "Setup On
+  Linux" / "Setup On Windows") and continue straight down the guide.
+- ⚡ **To use the faster C version** (**macOS and Linux only**): **skip ahead** to
+  the section **"Faster Version In C (macOS and Linux)"** further down, and follow
+  it from there.
+
+You can always come back later and try the other version; the photos and project
+folder are shared.
 
 ## Setup On macOS
 
@@ -344,6 +378,135 @@ This creates both `collage.png` and `tour.mp4`.
 ```powershell
 .\.venv\Scripts\python.exe collage.py --out collage.png --width 6480 --video --video-out tour.mp4
 ```
+
+## Faster Version In C (macOS and Linux)
+
+*This is the section the "Choose Your Version" signpost points to. You do not
+need the Python setup sections above to use it — only the common steps (install
+the tools, download the project, add your photos).*
+
+The project also ships a version written in C. It does the same thing as the
+Python scripts and produces the same images and videos, but it is faster because
+it spreads the work across all of your CPU cores.
+
+**This version runs only on macOS and Linux. It cannot be built or run on
+Windows** (it uses POSIX features that Windows does not provide). On Windows,
+use the Python version above.
+
+### What The C Version Needs
+
+The C version is compiled from source, so you need a few tools and libraries:
+
+- A **C compiler** (Clang on macOS, GCC on Linux).
+- **CMake**, the tool that configures and runs the build.
+- **libheif**, to read iPhone `.heic` photos.
+- **libwebp**, to read and write `.webp` images.
+- **ffmpeg**, to encode the video (same as the Python version).
+
+The two single-header `stb` libraries used for JPEG and PNG are already included
+in the `third_party/` folder, so there is nothing to download for those.
+
+### Install The Tools
+
+Use only the section for your operating system.
+
+#### macOS
+
+The compiler comes with the Xcode Command Line Tools. Install them once:
+
+```bash
+xcode-select --install
+```
+
+The other tools are installed with Homebrew. If you do not have Homebrew yet,
+install it from:
+
+```text
+https://brew.sh
+```
+
+Then install CMake and the libraries:
+
+```bash
+brew install cmake libheif webp ffmpeg
+```
+
+#### Linux (Ubuntu or Debian)
+
+```bash
+sudo apt update
+sudo apt install build-essential cmake libheif-dev libwebp-dev ffmpeg
+```
+
+On a different Linux distribution, install the same packages with your
+distribution's package manager (the development packages, e.g. `libheif-dev`).
+
+### Build The C Programs
+
+The easiest way is the setup script, which installs the libraries (on macOS or
+Ubuntu/Debian), creates the Python environment, and builds the C programs all at
+once. From inside the project folder:
+
+```bash
+bash setup.sh
+```
+
+If you prefer to build manually after the libraries are installed, run these two
+commands from inside the project folder:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release .
+cmake --build build -j
+```
+
+The first command configures the build inside a new `build/` folder. The second
+command compiles it. When it finishes, you will have two programs:
+
+- `build/collage`
+- `build/video`
+
+Check that they were built:
+
+```bash
+./build/collage --help
+./build/video --help
+```
+
+If you see the list of options, the build worked.
+
+### Run The C Programs
+
+The C programs take exactly the same options as the Python scripts. The only
+difference is how you start them: you call the program in the `build/` folder
+directly, with no `python` in front.
+
+Create a quick test collage (fast, for checking it works):
+
+```bash
+./build/collage --out collage-test.png --width 1080
+```
+
+Create the final high-resolution collage:
+
+```bash
+./build/collage --out collage.png --width 6480
+```
+
+Create the video from an existing collage:
+
+```bash
+./build/video --image collage.png --out tour.mp4 \
+  --format reel --duration 50 --fps 30 --cycles 4 --zoom 2.8
+```
+
+Create the collage and the video in one command:
+
+```bash
+./build/collage --out collage.png --width 6480 --video --video-out tour.mp4
+```
+
+All the options described in "Useful Options" below work the same way for the C
+programs.
 
 ## Useful Options
 

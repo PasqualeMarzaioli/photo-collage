@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 .venv/
 
+# C build output
+build/
+*.o
+
 photos/*
 !photos/.gitkeep
 target/
@@ -18,6 +22,4 @@ collage-test.jpg
 tour.mp4
 *.webm
 collage-config.json
-AGENTS.md
 CLAUDE.md
-mosaico.md
