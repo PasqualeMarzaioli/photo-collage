@@ -28,6 +28,8 @@ enum {
     OPT_FFMPEG,
     OPT_CRF,
     OPT_PRESET,
+    OPT_TOUR,
+    OPT_PAN_SPEED,
     OPT_HELP,
 };
 
@@ -46,7 +48,10 @@ static void print_usage(void)
             "  --zoom F        Maximum crop zoom (default: 2.8)\n"
             "  --ffmpeg PATH   ffmpeg binary or absolute path\n"
             "  --crf N         H.264 quality, lower is better (default: 18)\n"
-            "  --preset NAME   ffmpeg x264 preset (default: medium)\n");
+            "  --preset NAME   ffmpeg x264 preset (default: medium)\n"
+            "  --tour NAME     Camera tour: cover (shows all photos) or classic\n"
+            "                  (default: cover)\n"
+            "  --pan-speed F   Camera speed between photos, 1.0 = normal (default: 1.0)\n");
 }
 
 static bool parse_int(const char *name, const char *text, long *out)
@@ -88,6 +93,8 @@ int main(int argc, char **argv)
         .ffmpeg = "ffmpeg",
         .crf = 18,
         .preset = "medium",
+        .tour = "cover",
+        .pan_speed = 1.0,
     };
 
     static struct option long_opts[] = {
@@ -101,6 +108,8 @@ int main(int argc, char **argv)
         {"ffmpeg", required_argument, 0, OPT_FFMPEG},
         {"crf", required_argument, 0, OPT_CRF},
         {"preset", required_argument, 0, OPT_PRESET},
+        {"tour", required_argument, 0, OPT_TOUR},
+        {"pan-speed", required_argument, 0, OPT_PAN_SPEED},
         {"help", no_argument, 0, OPT_HELP},
         {0, 0, 0, 0},
     };
@@ -135,6 +144,11 @@ int main(int argc, char **argv)
             options.crf = (int)iv;
             break;
         case OPT_PRESET: options.preset = optarg; break;
+        case OPT_TOUR: options.tour = optarg; break;
+        case OPT_PAN_SPEED:
+            if (!parse_double("--pan-speed", optarg, &dv)) return 2;
+            options.pan_speed = dv;
+            break;
         case OPT_HELP: print_usage(); return 0;
         default: return 2;
         }

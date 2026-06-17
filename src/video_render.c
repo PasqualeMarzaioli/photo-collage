@@ -39,7 +39,7 @@ static const FormatSize kFormats[] = {
 };
 static const int kFormatCount = (int)(sizeof(kFormats) / sizeof(kFormats[0]));
 
-/* Normalised anchor points the camera pans between during the tour. */
+/* Normalised anchor points for the "classic" tour: a sparse wander. */
 static const double kAnchors[][2] = {
     {0.50, 0.50},
     {0.24, 0.25},
@@ -51,6 +51,20 @@ static const double kAnchors[][2] = {
 };
 static const int kAnchorCount = (int)(sizeof(kAnchors) / sizeof(kAnchors[0]));
 
+/*
+ * Normalised anchor points for the "cover" tour: many stops spread across the
+ * whole collage, ordered as a gentle downward wander, so over the video the
+ * camera passes over as many photos as possible. The last point returns toward
+ * the centre for a clean closing pull-back.
+ */
+static const double kCoverAnchors[][2] = {
+    {0.30, 0.14}, {0.70, 0.12}, {0.85, 0.24}, {0.50, 0.28}, {0.16, 0.26},
+    {0.22, 0.42}, {0.55, 0.40}, {0.80, 0.46}, {0.40, 0.54}, {0.68, 0.60},
+    {0.84, 0.66}, {0.30, 0.64}, {0.18, 0.74}, {0.52, 0.72}, {0.74, 0.80},
+    {0.38, 0.84}, {0.62, 0.88}, {0.50, 0.50},
+};
+static const int kCoverAnchorCount = (int)(sizeof(kCoverAnchors) / sizeof(kCoverAnchors[0]));
+
 /* One frame's camera mode, normalised centre, and crop zoom. */
 typedef struct {
     int is_contain; /* non-zero shows the full collage instead of a crop */
@@ -58,6 +72,17 @@ typedef struct {
     double cy;
     double zoom;
 } CameraState;
+
+/* The active tour: which anchor set to wander, how many segments to cross, and
+   how fast. base_segments is the number of anchor-to-anchor hops spread across
+   the tour at pan_speed 1.0 (the full cover set, or `cycles` for classic). */
+typedef struct {
+    const double (*anchors)[2];
+    int anchor_count;
+    int base_segments;
+    double max_zoom;
+    double pan_speed;
+} TourPlan;
 
 /* Cached source imagery and the reusable wide "contain" frame. */
 typedef struct {
@@ -106,14 +131,20 @@ static CameraState make_state(int contain, double cx, double cy, double zoom)
 /*
  * Return the camera state for a normalised render progress in [0, 1]: an
  * opening hold on the full collage, a single zoom-in, a steady segmented pan
- * across the anchors, and a final pull-back to the full collage.
+ * across the tour anchors, and a final pull-back to the full collage. The pan
+ * traverses `base_segments` hops at pan_speed 1.0; a higher pan_speed moves the
+ * camera faster (and loops over the anchors), showing more photos in the time.
  */
-static CameraState get_camera_state(double progress, int cycles, double max_zoom)
+static CameraState get_camera_state(double progress, const TourPlan *plan)
 {
     const double open_hold = 0.075;
     const double zoom_in_end = 0.20;
     const double close_start = 0.92;
-    double tour_zoom = max_zoom > 1.05 ? max_zoom : 1.05;
+    double tour_zoom = plan->max_zoom > 1.05 ? plan->max_zoom : 1.05;
+    const double (*anchors)[2] = plan->anchors;
+    int n = plan->anchor_count;
+    int base = plan->base_segments > 1 ? plan->base_segments : 1;
+    double speed = plan->pan_speed > 0.0 ? plan->pan_speed : 1.0;
 
     if (progress <= open_hold) {
         return make_state(1, 0.5, 0.5, 1.0);
@@ -121,17 +152,19 @@ static CameraState get_camera_state(double progress, int cycles, double max_zoom
 
     if (progress < zoom_in_end) {
         double amount = smoothstep((progress - open_hold) / (zoom_in_end - open_hold));
-        double cx = lerp(0.5, kAnchors[1][0], amount);
-        double cy = lerp(0.5, kAnchors[1][1], amount);
+        double cx = lerp(0.5, anchors[1][0], amount);
+        double cy = lerp(0.5, anchors[1][1], amount);
         double zoom = lerp(1.05, tour_zoom, amount);
         return make_state(0, cx, cy, zoom);
     }
 
     if (progress >= close_start) {
         double amount = smoothstep((progress - close_start) / (1.0 - close_start));
-        int si = (cycles > 1 ? cycles : 1) % kAnchorCount;
-        double cx = lerp(kAnchors[si][0], 0.5, amount);
-        double cy = lerp(kAnchors[si][1], 0.5, amount);
+        /* Continue the pull-back from wherever the tour ended (no jump). */
+        int last_seg = (int)(base * speed);
+        int si = (last_seg + 1) % n;
+        double cx = lerp(anchors[si][0], 0.5, amount);
+        double cy = lerp(anchors[si][1], 0.5, amount);
         double zoom = lerp(tour_zoom, 1.0, amount);
         if (progress >= 0.999) {
             return make_state(1, 0.5, 0.5, 1.0);
@@ -140,18 +173,13 @@ static CameraState get_camera_state(double progress, int cycles, double max_zoom
     }
 
     double tour_progress = (progress - zoom_in_end) / (close_start - zoom_in_end);
-    int segment_count = cycles > 1 ? cycles : 1;
-    double segment_pos = tour_progress * segment_count;
-    double cap = segment_count - 0.000001;
-    if (segment_pos > cap) {
-        segment_pos = cap;
-    }
+    double segment_pos = tour_progress * base * speed;
     int segment_index = (int)segment_pos;
     double segment_progress = smoothstep(segment_pos - segment_index);
-    int i0 = (segment_index + 1) % kAnchorCount;
-    int i1 = (segment_index + 2) % kAnchorCount;
-    double cx = lerp(kAnchors[i0][0], kAnchors[i1][0], segment_progress);
-    double cy = lerp(kAnchors[i0][1], kAnchors[i1][1], segment_progress);
+    int i0 = (segment_index + 1) % n;
+    int i1 = (segment_index + 2) % n;
+    double cx = lerp(anchors[i0][0], anchors[i1][0], segment_progress);
+    double cy = lerp(anchors[i0][1], anchors[i1][1], segment_progress);
     return make_state(0, cx, cy, tour_zoom);
 }
 
@@ -396,6 +424,15 @@ static bool validate_options(const VideoOptions *o)
         fprintf(stderr, "--crf must be between 0 and 51.\n");
         return false;
     }
+    if (strcmp(o->tour, "cover") != 0 && strcmp(o->tour, "classic") != 0) {
+        fprintf(stderr, "Unsupported tour `%s`. Use one of: classic, cover.\n",
+                o->tour);
+        return false;
+    }
+    if (o->pan_speed <= 0.0) {
+        fprintf(stderr, "--pan-speed must be greater than zero.\n");
+        return false;
+    }
     return true;
 }
 
@@ -404,7 +441,7 @@ static bool validate_options(const VideoOptions *o)
 /* Shared state for rendering one batch of consecutive frames in parallel. */
 typedef struct {
     const FrameRenderer *renderer;
-    const VideoOptions *options;
+    const TourPlan *plan;
     int frame_count;
     int start;
     Image **frames;
@@ -419,8 +456,7 @@ static void render_batch_one(void *context, int k)
         denominator = 1;
     }
     double progress = (double)index / (double)denominator;
-    CameraState state =
-        get_camera_state(progress, ctx->options->cycles, ctx->options->zoom);
+    CameraState state = get_camera_state(progress, ctx->plan);
     ctx->frames[k] = render_frame(ctx->renderer, &state);
 }
 
@@ -448,6 +484,16 @@ bool render_video(const VideoOptions *options)
     if (frame_count < 1) {
         frame_count = 1;
     }
+
+    /* Pick the tour: "cover" wanders all the spread-out anchors to show as many
+       photos as possible; "classic" uses the sparse original path. */
+    int cover = strcmp(options->tour, "classic") != 0;
+    TourPlan plan;
+    plan.anchors = cover ? kCoverAnchors : kAnchors;
+    plan.anchor_count = cover ? kCoverAnchorCount : kAnchorCount;
+    plan.base_segments = cover ? (kCoverAnchorCount - 1) : options->cycles;
+    plan.max_zoom = options->zoom;
+    plan.pan_speed = options->pan_speed;
 
     char size_arg[32];
     char fps_arg[16];
@@ -511,7 +557,7 @@ bool render_video(const VideoOptions *options)
         if (n > batch) {
             n = batch;
         }
-        BatchContext ctx = {&renderer, options, frame_count, start, frames};
+        BatchContext ctx = {&renderer, &plan, frame_count, start, frames};
         parallel_for(n, batch, render_batch_one, &ctx);
 
         for (int k = 0; k < n; ++k) {

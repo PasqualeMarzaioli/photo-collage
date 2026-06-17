@@ -51,6 +51,8 @@ typedef struct {
     int video_fps;
     int video_cycles;
     double video_zoom;
+    const char *video_tour;
+    double video_pan_speed;
     const char *ffmpeg;
 } CollageOptions;
 
@@ -438,6 +440,8 @@ static bool render_optional_video(const CollageOptions *options)
         .ffmpeg = options->ffmpeg,
         .crf = 18,
         .preset = "medium",
+        .tour = options->video_tour,
+        .pan_speed = options->video_pan_speed,
     };
     if (!render_video(&video)) {
         fprintf(stderr, "Video rendering failed.\n");
@@ -523,6 +527,8 @@ enum {
     OPT_FPS,
     OPT_CYCLES,
     OPT_ZOOM,
+    OPT_TOUR,
+    OPT_PAN_SPEED,
     OPT_FFMPEG,
     OPT_HELP,
 };
@@ -547,8 +553,11 @@ static void print_usage(void)
             "  --video-out PATH   Output path for --video (default: tour.mp4)\n"
             "  --duration S       Video duration in seconds (default: 50)\n"
             "  --fps N            Video frames per second (default: 30)\n"
-            "  --cycles N         Video pan segments (default: 4)\n"
+            "  --cycles N         Video pan segments, classic tour only (default: 4)\n"
             "  --zoom F           Video maximum zoom (default: 2.8)\n"
+            "  --tour NAME        Camera tour: cover (shows all photos) or classic\n"
+            "                     (default: cover)\n"
+            "  --pan-speed F      Camera speed between photos, 1.0 = normal (default: 1.0)\n"
             "  --ffmpeg PATH      ffmpeg binary or absolute path\n");
 }
 
@@ -600,6 +609,8 @@ int main(int argc, char **argv)
     options.video_fps = 30;
     options.video_cycles = 4;
     options.video_zoom = 2.8;
+    options.video_tour = "cover";
+    options.video_pan_speed = 1.0;
     options.ffmpeg = "ffmpeg";
 
     int width_arg = -1;     /* unset */
@@ -624,6 +635,8 @@ int main(int argc, char **argv)
         {"fps", required_argument, 0, OPT_FPS},
         {"cycles", required_argument, 0, OPT_CYCLES},
         {"zoom", required_argument, 0, OPT_ZOOM},
+        {"tour", required_argument, 0, OPT_TOUR},
+        {"pan-speed", required_argument, 0, OPT_PAN_SPEED},
         {"ffmpeg", required_argument, 0, OPT_FFMPEG},
         {"help", no_argument, 0, OPT_HELP},
         {0, 0, 0, 0},
@@ -679,6 +692,11 @@ int main(int argc, char **argv)
         case OPT_ZOOM:
             if (!parse_double("--zoom", optarg, &dv)) return 2;
             options.video_zoom = dv;
+            break;
+        case OPT_TOUR: options.video_tour = optarg; break;
+        case OPT_PAN_SPEED:
+            if (!parse_double("--pan-speed", optarg, &dv)) return 2;
+            options.video_pan_speed = dv;
             break;
         case OPT_FFMPEG: options.ffmpeg = optarg; break;
         case OPT_HELP: print_usage(); return 0;

@@ -348,19 +348,26 @@ Create `collage.png` first, then run the video command.
 
 ```bash
 .venv/bin/python video.py --image collage.png --out tour.mp4 \
-  --format reel --duration 50 --fps 30 --cycles 4 --zoom 2.8
+  --format reel --duration 50 --fps 30 --zoom 2.8
 ```
 
 ### Windows PowerShell
 
 ```powershell
-.\.venv\Scripts\python.exe video.py --image collage.png --out tour.mp4 --format reel --duration 50 --fps 30 --cycles 4 --zoom 2.8
+.\.venv\Scripts\python.exe video.py --image collage.png --out tour.mp4 --format reel --duration 50 --fps 30 --zoom 2.8
 ```
 
 The result will be `tour.mp4`.
 
-The video opens on the full collage, zooms in once, pans across the photos at a
-steady zoom, then slowly zooms back out at the end.
+By default the video opens on the full collage, zooms in once, then moves across
+the photos to show as many of them as possible (the `cover` tour), and finally
+zooms back out at the end.
+
+To make the camera move faster between photos, add `--pan-speed` (for example
+`--pan-speed 2` for twice as fast). To go back to the older, calmer path that
+visits only a few areas, add `--tour classic` (with `classic` you can also set
+`--cycles` to change how many areas it visits). Full list of options is in
+"All Options (Reference)" below.
 
 ## Create Collage And Video In One Command
 
@@ -496,7 +503,7 @@ Create the video from an existing collage:
 
 ```bash
 ./build/video --image collage.png --out tour.mp4 \
-  --format reel --duration 50 --fps 30 --cycles 4 --zoom 2.8
+  --format reel --duration 50 --fps 30 --zoom 2.8
 ```
 
 Create the collage and the video in one command:
@@ -539,6 +546,57 @@ The default is connected photos:
 ```bash
 --gap 0 --radius 0
 ```
+
+## All Options (Reference)
+
+These options work the same way in both versions. Just add them after the
+command, for example:
+
+```bash
+.venv/bin/python video.py --image collage.png --out tour.mp4 --fps 60 --pan-speed 2
+./build/video --image collage.png --out tour.mp4 --fps 60 --pan-speed 2
+```
+
+### Collage options (`collage.py` / `build/collage`)
+
+| Option | What it does | Default |
+|---|---|---|
+| `--photos DIR` | Folder with the source photos | `photos` |
+| `--out PATH` | Output image path | `collage.png` |
+| `--width N` | Output width in pixels (height is 16/9 of the width) | `2160` |
+| `--scale F` | Output scale relative to 1080 px width (alternative to `--width`) | — |
+| `--cols N` | Approximate number of columns (omit for automatic) | auto |
+| `--gap N` | Gap between photos, in base 1080 px units | `0` |
+| `--radius N` | Rounded-corner radius, in base 1080 px units | `0` |
+| `--bg COLOR` | Background color, e.g. `#ffffff` | `#ffffff` |
+| `--shuffle` | Shuffle the photo order | off |
+| `--seed N` | Seed for `--shuffle` (same seed = same order) | `0` |
+| `--video` | Also render the video right after the collage | off |
+| `--video-out PATH` | Output path when using `--video` | `tour.mp4` |
+| `--ffmpeg PATH` | ffmpeg binary name or full path | `ffmpeg` |
+
+### Video options (`video.py` / `build/video`)
+
+| Option | What it does | Default |
+|---|---|---|
+| `--image PATH` | Source collage image (**required**) | — |
+| `--out PATH` | Output MP4 path | `tour.mp4` |
+| `--format NAME` | `reel` (1080×1920), `feed` (1080×1350), or `square` (1080×1080) | `reel` |
+| `--duration S` | Video length in seconds | `50` |
+| `--fps N` | Frames per second (1–120) | `30` |
+| `--zoom F` | Maximum zoom (≥ 1.0) | `2.8` |
+| `--tour NAME` | `cover` (moves over all photos) or `classic` (sparse wander) | `cover` |
+| `--pan-speed F` | Camera speed between photos (> 0; `2` = twice as fast) | `1.0` |
+| `--cycles N` | Number of pan segments — **classic tour only** | `4` |
+| `--crf N` | H.264 quality, 0–51, lower = better | `18` |
+| `--preset NAME` | x264 preset, e.g. `fast`, `medium`, `slow` | `medium` |
+| `--ffmpeg PATH` | ffmpeg binary name or full path | `ffmpeg` |
+
+When you generate the video together with the collage (`collage … --video`), the
+video tuning options `--duration`, `--fps`, `--cycles`, `--zoom`, `--tour`, and
+`--pan-speed` are accepted too. `--format`, `--crf`, and `--preset` are available
+only on the standalone `video` program (the combined command always uses `reel`,
+crf 18, preset medium).
 
 ## Common Problems
 

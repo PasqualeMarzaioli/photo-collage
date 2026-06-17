@@ -32,6 +32,7 @@ FORMAT_SIZES: dict[str, tuple[int, int]] = {
     "square": (1080, 1080),
 }
 
+# Sparse wander used by the "classic" tour.
 ANCHORS: tuple[tuple[float, float], ...] = (
     (0.50, 0.50),
     (0.24, 0.25),
@@ -40,6 +41,17 @@ ANCHORS: tuple[tuple[float, float], ...] = (
     (0.78, 0.78),
     (0.18, 0.55),
     (0.60, 0.18),
+)
+
+# Many stops spread across the whole collage, ordered as a gentle downward
+# wander, used by the default "cover" tour so the camera passes over as many
+# photos as possible. The last point returns toward the center for the closing
+# pull-back.
+COVER_ANCHORS: tuple[tuple[float, float], ...] = (
+    (0.30, 0.14), (0.70, 0.12), (0.85, 0.24), (0.50, 0.28), (0.16, 0.26),
+    (0.22, 0.42), (0.55, 0.40), (0.80, 0.46), (0.40, 0.54), (0.68, 0.60),
+    (0.84, 0.66), (0.30, 0.64), (0.18, 0.74), (0.52, 0.72), (0.74, 0.80),
+    (0.38, 0.84), (0.62, 0.88), (0.50, 0.50),
 )
 
 
@@ -71,6 +83,19 @@ class VideoOptions:
     ffmpeg: str
     crf: int
     preset: str
+    tour: str
+    pan_speed: float
+
+
+@dataclass(frozen=True)
+class TourPlan:
+    """Describe the active camera tour: which anchors to wander, how many hops
+    to cross at pan speed 1.0, the maximum zoom, and the speed multiplier."""
+
+    anchors: tuple[tuple[float, float], ...]
+    base_segments: int
+    max_zoom: float
+    pan_speed: float
 
 
 @dataclass
@@ -176,25 +201,37 @@ def create_frame_renderer(image_path: Path, output_size: tuple[int, int]) -> Fra
     )
 
 
-def get_camera_state(progress: float, cycles: int, max_zoom: float) -> CameraState:
-    """Return the deterministic camera state for a normalized render progress."""
+def get_camera_state(progress: float, plan: TourPlan) -> CameraState:
+    """Return the deterministic camera state for a normalized render progress.
+
+    The path opens on the full collage, zooms in once, pans across the tour
+    anchors for `base_segments` hops (scaled by `pan_speed`, looping over the
+    anchors when faster), and pulls back out at the end.
+    """
 
     open_hold = 0.075
     zoom_in_end = 0.20
     close_start = 0.92
-    tour_zoom = max(1.05, max_zoom)
+    tour_zoom = max(1.05, plan.max_zoom)
+    anchors = plan.anchors
+    count = len(anchors)
+    base = max(1, plan.base_segments)
+    speed = plan.pan_speed if plan.pan_speed > 0.0 else 1.0
+
     if progress <= open_hold:
         return CameraState("contain", 0.5, 0.5, 1.0)
 
     if progress < zoom_in_end:
         amount = smoothstep((progress - open_hold) / (zoom_in_end - open_hold))
-        center = lerp_point((0.5, 0.5), ANCHORS[1], amount)
+        center = lerp_point((0.5, 0.5), anchors[1], amount)
         zoom = lerp(1.05, tour_zoom, amount)
         return CameraState("crop", center[0], center[1], zoom)
 
     if progress >= close_start:
         amount = smoothstep((progress - close_start) / (1.0 - close_start))
-        start = ANCHORS[max(1, cycles) % len(ANCHORS)]
+        # Continue the pull-back from wherever the tour ended (no jump).
+        last_segment = int(base * speed)
+        start = anchors[(last_segment + 1) % count]
         center = lerp_point(start, (0.5, 0.5), amount)
         zoom = lerp(tour_zoom, 1.0, amount)
         if progress >= 0.999:
@@ -202,13 +239,11 @@ def get_camera_state(progress: float, cycles: int, max_zoom: float) -> CameraSta
         return CameraState("crop", center[0], center[1], zoom)
 
     tour_progress = (progress - zoom_in_end) / (close_start - zoom_in_end)
-    segment_count = max(1, cycles)
-    segment_position = min(tour_progress * segment_count,
-                           segment_count - 0.000001)
+    segment_position = tour_progress * base * speed
     segment_index = int(segment_position)
     segment_progress = smoothstep(segment_position - segment_index)
-    start = ANCHORS[(segment_index + 1) % len(ANCHORS)]
-    end = ANCHORS[(segment_index + 2) % len(ANCHORS)]
+    start = anchors[(segment_index + 1) % count]
+    end = anchors[(segment_index + 2) % count]
     center = lerp_point(start, end, segment_progress)
     return CameraState("crop", center[0], center[1], tour_zoom)
 
@@ -269,6 +304,24 @@ def validate_options(options: VideoOptions) -> None:
         raise VideoError("--zoom must be at least 1.0.")
     if options.crf < 0 or options.crf > 51:
         raise VideoError("--crf must be between 0 and 51.")
+    if options.tour not in ("cover", "classic"):
+        raise VideoError(
+            f"Unsupported tour `{options.tour}`. Use one of: classic, cover.")
+    if options.pan_speed <= 0:
+        raise VideoError("--pan-speed must be greater than zero.")
+
+
+def build_tour_plan(options: VideoOptions) -> TourPlan:
+    """Build the camera tour plan from the options.
+
+    The "cover" tour wanders all the spread-out anchors to show as many photos
+    as possible; "classic" uses the sparse original path with `cycles` segments.
+    """
+
+    if options.tour == "classic":
+        return TourPlan(ANCHORS, options.cycles, options.zoom, options.pan_speed)
+    return TourPlan(
+        COVER_ANCHORS, len(COVER_ANCHORS) - 1, options.zoom, options.pan_speed)
 
 
 def render_video(options: VideoOptions) -> None:
@@ -279,6 +332,7 @@ def render_video(options: VideoOptions) -> None:
     renderer = create_frame_renderer(options.image, output_size)
     ffmpeg_path = resolve_ffmpeg(options.ffmpeg)
     frame_count = max(1, int(round(options.duration * options.fps)))
+    tour_plan = build_tour_plan(options)
     options.out.parent.mkdir(parents=True, exist_ok=True)
 
     command = [
@@ -323,7 +377,7 @@ def render_video(options: VideoOptions) -> None:
     try:
         for frame_index in range(frame_count):
             progress = frame_index / max(1, frame_count - 1)
-            state = get_camera_state(progress, options.cycles, options.zoom)
+            state = get_camera_state(progress, tour_plan)
             frame = render_frame(renderer, state)
             process.stdin.write(frame.convert("RGB").tobytes())
             if frame_index % max(1, options.fps * 5) == 0:
@@ -366,6 +420,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cycles", type=int,
                         help="Number of zoom and pan cycles.")
     parser.add_argument("--zoom", type=float, help="Maximum crop zoom.")
+    parser.add_argument("--tour", choices=("cover", "classic"),
+                        help="Camera tour: cover (shows all photos) or classic.")
+    parser.add_argument("--pan-speed", type=float, dest="pan_speed",
+                        help="Camera speed between photos, 1.0 = normal.")
     parser.add_argument("--ffmpeg", default=None,
                         help="ffmpeg binary or absolute path.")
     parser.add_argument("--crf", type=int,
@@ -408,6 +466,10 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
         crf=args.crf if args.crf is not None else int(
             video_config.get("crf", 18)),
         preset=args.preset or str(video_config.get("preset", "medium")),
+        tour=args.tour or str(video_config.get("tour", "cover")),
+        pan_speed=args.pan_speed
+        if args.pan_speed is not None
+        else float(video_config.get("panSpeed", video_config.get("pan_speed", 1.0))),
     )
 
 

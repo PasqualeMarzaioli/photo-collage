@@ -85,6 +85,8 @@ class CollageOptions:
     video_fps: int
     video_cycles: int
     video_zoom: float
+    video_tour: str
+    video_pan_speed: float
     ffmpeg: str
 
 
@@ -345,6 +347,8 @@ def render_optional_video(options: CollageOptions, image_path: Path) -> None:
                 ffmpeg=options.ffmpeg,
                 crf=18,
                 preset="medium",
+                tour=options.video_tour,
+                pan_speed=options.video_pan_speed,
             )
         )
     except Exception as exc:
@@ -393,6 +397,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Video pan segments.")
     parser.add_argument("--zoom", type=float, default=2.8,
                         help="Video maximum zoom.")
+    parser.add_argument("--tour", choices=("cover", "classic"), default="cover",
+                        help="Camera tour: cover (shows all photos) or classic.")
+    parser.add_argument("--pan-speed", type=float, default=1.0, dest="pan_speed",
+                        help="Camera speed between photos, 1.0 = normal.")
     parser.add_argument("--ffmpeg", default="ffmpeg",
                         help="ffmpeg binary or absolute path.")
     return parser.parse_args(argv)
@@ -423,6 +431,8 @@ def options_from_args(args: argparse.Namespace) -> CollageOptions:
         video_fps=args.fps,
         video_cycles=args.cycles,
         video_zoom=args.zoom,
+        video_tour=args.tour,
+        video_pan_speed=args.pan_speed,
         ffmpeg=args.ffmpeg,
     )
 

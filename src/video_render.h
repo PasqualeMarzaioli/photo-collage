@@ -21,11 +21,13 @@ typedef struct {
     const char *format;   /* "reel", "feed", or "square" */
     double duration;      /* seconds */
     int fps;              /* frames per second */
-    int cycles;           /* number of pan segments */
+    int cycles;           /* number of pan segments (classic tour only) */
     double zoom;          /* maximum crop zoom */
     const char *ffmpeg;   /* ffmpeg binary name or absolute path */
     int crf;              /* H.264 quality, lower is better */
     const char *preset;   /* x264 preset */
+    const char *tour;     /* "cover" (default, shows all photos) or "classic" */
+    double pan_speed;     /* camera speed multiplier between photos (default 1.0) */
 } VideoOptions;
 
 /*
