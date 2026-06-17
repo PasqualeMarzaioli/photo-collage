@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Render deterministic zoom-tour videos from collage images."""
+"""Create a deterministic zoom-tour MP4 from a collage image.
+
+This program takes a rendered collage, moves a vertical 9:16 camera over it with
+a smooth zoom-and-pan path, and encodes the result as an MP4.
+
+Author: Pasquale Marzaioli
+"""
 
 from __future__ import annotations
 
@@ -197,7 +203,8 @@ def get_camera_state(progress: float, cycles: int, max_zoom: float) -> CameraSta
 
     tour_progress = (progress - zoom_in_end) / (close_start - zoom_in_end)
     segment_count = max(1, cycles)
-    segment_position = min(tour_progress * segment_count, segment_count - 0.000001)
+    segment_position = min(tour_progress * segment_count,
+                           segment_count - 0.000001)
     segment_index = int(segment_position)
     segment_progress = smoothstep(segment_position - segment_index)
     start = ANCHORS[(segment_index + 1) % len(ANCHORS)]
@@ -223,8 +230,10 @@ def crop_frame(renderer: FrameRenderer, state: CameraState) -> Image.Image:
 
     viewport_width = max_width / max(1.0, state.zoom)
     viewport_height = max_height / max(1.0, state.zoom)
-    center_x = clamp(state.center_x * source.width, viewport_width / 2, source.width - viewport_width / 2)
-    center_y = clamp(state.center_y * source.height, viewport_height / 2, source.height - viewport_height / 2)
+    center_x = clamp(state.center_x * source.width,
+                     viewport_width / 2, source.width - viewport_width / 2)
+    center_y = clamp(state.center_y * source.height,
+                     viewport_height / 2, source.height - viewport_height / 2)
 
     left = int(round(center_x - viewport_width / 2))
     top = int(round(center_y - viewport_height / 2))
@@ -248,7 +257,8 @@ def validate_options(options: VideoOptions) -> None:
 
     if options.format not in FORMAT_SIZES:
         valid = ", ".join(sorted(FORMAT_SIZES))
-        raise VideoError(f"Unsupported format `{options.format}`. Use one of: {valid}.")
+        raise VideoError(
+            f"Unsupported format `{options.format}`. Use one of: {valid}.")
     if options.duration <= 0:
         raise VideoError("--duration must be greater than zero.")
     if options.fps <= 0 or options.fps > 120:
@@ -323,7 +333,8 @@ def render_video(options: VideoOptions) -> None:
                 )
     except BrokenPipeError as exc:
         stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
-        raise VideoError(f"ffmpeg stopped while receiving frames: {stderr}") from exc
+        raise VideoError(
+            f"ffmpeg stopped while receiving frames: {stderr}") from exc
     finally:
         try:
             process.stdin.close()
@@ -340,17 +351,25 @@ def render_video(options: VideoOptions) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments for video rendering."""
 
-    parser = argparse.ArgumentParser(description="Render a 9:16 zoom-tour MP4.")
-    parser.add_argument("--config", type=Path, help="JSON config with video settings.")
+    parser = argparse.ArgumentParser(
+        description="Render a 9:16 zoom-tour MP4.")
+    parser.add_argument("--config", type=Path,
+                        help="JSON config with video settings.")
     parser.add_argument("--image", type=Path, help="Source collage image.")
-    parser.add_argument("--out", type=Path, default=Path("tour.mp4"), help="Output MP4 path.")
-    parser.add_argument("--format", choices=sorted(FORMAT_SIZES), help="Output format.")
-    parser.add_argument("--duration", type=float, help="Video duration in seconds.")
+    parser.add_argument("--out", type=Path,
+                        default=Path("tour.mp4"), help="Output MP4 path.")
+    parser.add_argument(
+        "--format", choices=sorted(FORMAT_SIZES), help="Output format.")
+    parser.add_argument("--duration", type=float,
+                        help="Video duration in seconds.")
     parser.add_argument("--fps", type=int, help="Frames per second.")
-    parser.add_argument("--cycles", type=int, help="Number of zoom and pan cycles.")
+    parser.add_argument("--cycles", type=int,
+                        help="Number of zoom and pan cycles.")
     parser.add_argument("--zoom", type=float, help="Maximum crop zoom.")
-    parser.add_argument("--ffmpeg", default=None, help="ffmpeg binary or absolute path.")
-    parser.add_argument("--crf", type=int, help="H.264 quality, lower is better.")
+    parser.add_argument("--ffmpeg", default=None,
+                        help="ffmpeg binary or absolute path.")
+    parser.add_argument("--crf", type=int,
+                        help="H.264 quality, lower is better.")
     parser.add_argument("--preset", help="ffmpeg x264 preset.")
     return parser.parse_args(argv)
 
@@ -358,14 +377,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def options_from_args(args: argparse.Namespace) -> VideoOptions:
     """Merge CLI arguments and optional JSON config into video options."""
 
-    config: dict[str, Any] = load_json_config(args.config) if args.config else {}
+    config: dict[str, Any] = load_json_config(
+        args.config) if args.config else {}
     video_config = config.get("video", {})
     if not isinstance(video_config, dict):
         raise VideoError("Config key `video` must be an object when present.")
 
-    image_value = args.image or config.get("image") or config.get("outputImage")
+    image_value = args.image or config.get(
+        "image") or config.get("outputImage")
     if image_value is None:
-        raise VideoError("--image is required unless the config provides `image`.")
+        raise VideoError(
+            "--image is required unless the config provides `image`.")
 
     return VideoOptions(
         image=Path(image_value),
@@ -374,7 +396,8 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
         duration=args.duration
         if args.duration is not None
         else float(video_config.get("duration", 50.0)),
-        fps=args.fps if args.fps is not None else int(video_config.get("fps", 30)),
+        fps=args.fps if args.fps is not None else int(
+            video_config.get("fps", 30)),
         cycles=args.cycles
         if args.cycles is not None
         else int(video_config.get("cycles", 4)),
@@ -382,7 +405,8 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
         if args.zoom is not None
         else float(video_config.get("zoom", video_config.get("maxZoom", 2.8))),
         ffmpeg=args.ffmpeg or str(video_config.get("ffmpeg", "ffmpeg")),
-        crf=args.crf if args.crf is not None else int(video_config.get("crf", 18)),
+        crf=args.crf if args.crf is not None else int(
+            video_config.get("crf", 18)),
         preset=args.preset or str(video_config.get("preset", "medium")),
     )
 

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Render a 9:16 Instagram Stories collage from local photos."""
+"""Create a collage from local photos.
+
+This program reads supported images from the photos folder, places each photo
+exactly once into a connected vertical collage, and can optionally render a
+zoom-tour video from the generated collage.
+
+Author: Pasquale Marzaioli
+"""
 
 from __future__ import annotations
 
@@ -91,7 +98,8 @@ def parse_color(value: str | Iterable[int]) -> tuple[int, int, int]:
         if len(text) == 3:
             text = "".join(channel * 2 for channel in text)
         if len(text) != 6:
-            raise CollageError(f"Invalid color `{value}`. Use a value like #ffffff.")
+            raise CollageError(
+                f"Invalid color `{value}`. Use a value like #ffffff.")
         try:
             return (
                 int(text[0:2], 16),
@@ -99,7 +107,8 @@ def parse_color(value: str | Iterable[int]) -> tuple[int, int, int]:
                 int(text[4:6], 16),
             )
         except ValueError as exc:
-            raise CollageError(f"Invalid color `{value}`. Use a value like #ffffff.") from exc
+            raise CollageError(
+                f"Invalid color `{value}`. Use a value like #ffffff.") from exc
 
     parts = list(value)
     if len(parts) != 3:
@@ -138,7 +147,8 @@ def distribute_row_counts(photo_count: int, desired_cols: int) -> tuple[int, ...
 
     rows = max(1, round(photo_count / desired_cols))
     row_counts = tuple(
-        math.floor((row + 1) * photo_count / rows) - math.floor(row * photo_count / rows)
+        math.floor((row + 1) * photo_count / rows) -
+        math.floor(row * photo_count / rows)
         for row in range(rows)
     )
     if any(count <= 0 for count in row_counts):
@@ -192,8 +202,10 @@ def collect_image_paths(directory: Path) -> list[Path]:
     ]
     paths.sort(key=lambda path: path.name.lower())
     if not paths:
-        supported = ", ".join(sorted(extension.lstrip(".") for extension in SUPPORTED_EXTENSIONS))
-        raise CollageError(f"No images found in {directory}/ (supported: {supported})")
+        supported = ", ".join(sorted(extension.lstrip(".")
+                              for extension in SUPPORTED_EXTENSIONS))
+        raise CollageError(
+            f"No images found in {directory}/ (supported: {supported})")
     return paths
 
 
@@ -229,7 +241,8 @@ def tile_box(layout: Layout, cell_index: int) -> tuple[int, int, int, int]:
     col = remaining
     row_count = layout.row_counts[row]
     tile_width = (layout.width - layout.gap * (row_count + 1)) / row_count
-    tile_height = (layout.height - layout.gap * (layout.rows + 1)) / layout.rows
+    tile_height = (layout.height - layout.gap *
+                   (layout.rows + 1)) / layout.rows
     left = round(layout.gap + col * (tile_width + layout.gap))
     top = round(layout.gap + row * (tile_height + layout.gap))
     right = round(layout.gap + col * (tile_width + layout.gap) + tile_width)
@@ -341,30 +354,47 @@ def render_optional_video(options: CollageOptions, image_path: Path) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments for collage rendering."""
 
-    parser = argparse.ArgumentParser(description="Render a 9:16 Instagram Stories collage.")
-    parser.add_argument("--photos", type=Path, default=Path("photos"), help="Directory containing photos.")
-    parser.add_argument("--out", type=Path, default=Path("collage.png"), help="Output image path.")
+    parser = argparse.ArgumentParser(
+        description="Render a 9:16 Instagram Stories collage.")
+    parser.add_argument("--photos", type=Path, default=Path("photos"),
+                        help="Directory containing photos.")
+    parser.add_argument("--out", type=Path,
+                        default=Path("collage.png"), help="Output image path.")
     parser.add_argument(
         "--mode",
         choices=("collage", "grid"),
         default="collage",
         help="Render mode. `grid` is kept as an alias for collage.",
     )
-    parser.add_argument("--cols", type=int, help="Approximate column count, or omit for auto.")
-    parser.add_argument("--scale", type=float, help="Output scale relative to 1080 px width.")
-    parser.add_argument("--width", type=int, default=None, help="Output image width in pixels.")
-    parser.add_argument("--radius", type=int, default=0, help="Corner radius in base 1080 px units.")
-    parser.add_argument("--gap", type=int, default=0, help="Gap in base 1080 px units.")
-    parser.add_argument("--bg", default="#ffffff", help="Canvas background color, such as #ffffff.")
-    parser.add_argument("--shuffle", action="store_true", help="Shuffle source photos deterministically.")
+    parser.add_argument("--cols", type=int,
+                        help="Approximate column count, or omit for auto.")
+    parser.add_argument("--scale", type=float,
+                        help="Output scale relative to 1080 px width.")
+    parser.add_argument("--width", type=int, default=None,
+                        help="Output image width in pixels.")
+    parser.add_argument("--radius", type=int, default=0,
+                        help="Corner radius in base 1080 px units.")
+    parser.add_argument("--gap", type=int, default=0,
+                        help="Gap in base 1080 px units.")
+    parser.add_argument("--bg", default="#ffffff",
+                        help="Canvas background color, such as #ffffff.")
+    parser.add_argument("--shuffle", action="store_true",
+                        help="Shuffle source photos deterministically.")
     parser.add_argument("--seed", type=int, default=0, help="Shuffle seed.")
-    parser.add_argument("--video", action="store_true", help="Render a Reel MP4 after the collage.")
-    parser.add_argument("--video-out", type=Path, default=Path("tour.mp4"), help="Output path for --video.")
-    parser.add_argument("--duration", type=float, default=50.0, help="Video duration in seconds.")
-    parser.add_argument("--fps", type=int, default=30, help="Video frames per second.")
-    parser.add_argument("--cycles", type=int, default=4, help="Video pan segments.")
-    parser.add_argument("--zoom", type=float, default=2.8, help="Video maximum zoom.")
-    parser.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg binary or absolute path.")
+    parser.add_argument("--video", action="store_true",
+                        help="Render a Reel MP4 after the collage.")
+    parser.add_argument("--video-out", type=Path,
+                        default=Path("tour.mp4"), help="Output path for --video.")
+    parser.add_argument("--duration", type=float, default=50.0,
+                        help="Video duration in seconds.")
+    parser.add_argument("--fps", type=int, default=30,
+                        help="Video frames per second.")
+    parser.add_argument("--cycles", type=int, default=4,
+                        help="Video pan segments.")
+    parser.add_argument("--zoom", type=float, default=2.8,
+                        help="Video maximum zoom.")
+    parser.add_argument("--ffmpeg", default="ffmpeg",
+                        help="ffmpeg binary or absolute path.")
     return parser.parse_args(argv)
 
 
