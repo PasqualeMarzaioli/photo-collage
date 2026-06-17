@@ -1,12 +1,11 @@
-# Ciao Milano Collage
+# Collage
 
 Beginner-friendly guide for creating:
 
 1. A vertical 9:16 Instagram Stories collage from all photos in `photos/`.
 2. A vertical Reel-style zoom video from that collage.
 
-The project runs from the terminal. There is no website and no target-image
-mosaic. Every source photo is used exactly once.
+The project runs from the terminal. Every source photo is used exactly once.
 
 ## What You Need
 
@@ -51,6 +50,98 @@ ffmpeg -version
 If one of these commands says the program was not found, install that program
 before continuing.
 
+## Install Missing Programs
+
+Use only the section for your operating system.
+
+### macOS
+
+The easiest way on macOS is Homebrew.
+
+First check if Homebrew is installed:
+
+```bash
+brew --version
+```
+
+If `brew` is not found, install Homebrew from:
+
+```text
+https://brew.sh
+```
+
+After Homebrew is installed, install Git, Python, and ffmpeg:
+
+```bash
+brew install git python ffmpeg
+```
+
+Then check again:
+
+```bash
+git --version
+python3 --version
+ffmpeg -version
+```
+
+### Linux
+
+On Ubuntu or Debian, run:
+
+```bash
+sudo apt update
+sudo apt install git python3 python3-venv python3-pip ffmpeg
+```
+
+Then check again:
+
+```bash
+git --version
+python3 --version
+ffmpeg -version
+```
+
+If you use a different Linux distribution, install the same programs with your
+distribution's package manager.
+
+### Windows
+
+On Windows, the easiest way is usually `winget`, which is included in recent
+versions of Windows 10 and Windows 11.
+
+Check if `winget` is available:
+
+```powershell
+winget --version
+```
+
+If `winget` works, install Git, Python, and ffmpeg:
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Python.Python.3.12 -e
+winget install --id Gyan.FFmpeg -e
+```
+
+Close PowerShell, open it again, then check:
+
+```powershell
+git --version
+py --version
+ffmpeg -version
+```
+
+If `winget` is not available, install them manually from:
+
+```text
+https://git-scm.com/download/win
+https://www.python.org/downloads/windows/
+https://ffmpeg.org/download.html
+```
+
+When installing Python manually on Windows, enable the option named **Add Python
+to PATH** if the installer shows it.
+
 ## Download The Project
 
 Open a terminal first:
@@ -82,8 +173,6 @@ Supported formats:
 - `.png`
 - `.webp`
 - `.heic` / `.heif`
-
-Do not put photos in `target/`. The target folder is not used anymore.
 
 ## Setup On macOS
 
