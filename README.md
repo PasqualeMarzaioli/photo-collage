@@ -153,7 +153,7 @@ Open a terminal first:
 Choose a folder where you want to keep the project, then run:
 
 ```bash
-git clone https://github.com/PasqualeMarzaioli/photo-mosaic.git collage
+git clone https://github.com/PasqualeMarzaioli/photo-collage collage
 cd collage
 ```
 
