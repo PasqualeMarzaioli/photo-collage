@@ -6,7 +6,8 @@
  * for H.264 encoding. It is shared by both executables: the standalone `video`
  * tool and the `--video` option of the `collage` tool.
  *
- * Author: Pasquale Marzaioli
+ * Authors:
+ *     Pasquale Marzaioli
  */
 
 #ifndef VIDEO_RENDER_H
@@ -28,6 +29,12 @@ typedef struct {
     const char *preset;   /* x264 preset */
     const char *tour;     /* "cover" (default, shows all photos) or "classic" */
     double pan_speed;     /* camera speed multiplier between photos (default 1.0) */
+    const char *audio_main; /* optional main audio track path */
+    const char *audio_bg;   /* optional background audio track path */
+    double audio_main_vol;  /* main track gain */
+    double audio_bg_low;    /* background gain while main plays */
+    double audio_bg_high;   /* background gain after main ends */
+    double audio_fade;      /* rise and ending fade length in seconds */
 } VideoOptions;
 
 /*

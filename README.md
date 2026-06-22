@@ -192,6 +192,36 @@ Supported formats:
 - `.webp`
 - `.heic` / `.heif`
 
+## Add Your Audio (Optional)
+
+If you want the video to have a soundtrack, put your audio files inside the
+`audio/` folder.
+
+Use one file as the main track and one file as the background track:
+
+- Main track: voice-over, speech, or the audio that should stay in front.
+- Background track: music or ambience that should play quietly under the main
+  track, then rise after the main track ends.
+
+For example:
+
+```text
+audio/audio.m4a
+audio/background.mov
+```
+
+The exact file names are your choice. Use the same paths in the command:
+
+```bash
+--audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
+Audio is optional. If you do not pass `--audio-main` or `--audio-bg`, the video
+is silent, exactly like the original version of this tool.
+
+Local audio files are ignored by git, so you can keep personal tracks in
+`audio/` without accidentally committing them.
+
 ## Choose Your Version (Python or C)
 
 Everything up to this point — installing the tools, downloading the project, and
@@ -363,6 +393,40 @@ By default the video opens on the full collage, zooms in once, then moves across
 the photos to show as many of them as possible (the `cover` tour), and finally
 zooms back out at the end.
 
+The video is silent unless you add audio flags. To mix a main track with a
+background song, pass both paths. The background loops, stays quiet under the
+main track, then rises after the main track ends:
+
+### macOS / Linux
+
+```bash
+.venv/bin/python video.py --image collage.png --out tour-audio.mp4 \
+  --format reel --duration 50 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
+### Windows PowerShell
+
+```powershell
+.\.venv\Scripts\python.exe video.py --image collage.png --out tour-audio.mp4 --format reel --duration 50 --audio-main audio\audio.m4a --audio-bg audio\background.mov
+```
+
+To create a two-minute video, set `--duration 120`:
+
+### macOS / Linux
+
+```bash
+.venv/bin/python video.py --image collage.png --out tour-2min.mp4 \
+  --format reel --duration 120 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
+### Windows PowerShell
+
+```powershell
+.\.venv\Scripts\python.exe video.py --image collage.png --out tour-2min.mp4 --format reel --duration 120 --audio-main audio\audio.m4a --audio-bg audio\background.mov
+```
+
 To make the camera move faster between photos, add `--pan-speed` (for example
 `--pan-speed 2` for twice as fast). To go back to the older, calmer path that
 visits only a few areas, add `--tour classic` (with `classic` you can also set
@@ -384,6 +448,23 @@ This creates both `collage.png` and `tour.mp4`.
 
 ```powershell
 .\.venv\Scripts\python.exe collage.py --out collage.png --width 6480 --video --video-out tour.mp4
+```
+
+To create the collage and a two-minute video with audio in one command:
+
+### macOS / Linux
+
+```bash
+.venv/bin/python collage.py --out collage.png --width 6480 \
+  --video --video-out tour-2min.mp4 \
+  --duration 120 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
+### Windows PowerShell
+
+```powershell
+.\.venv\Scripts\python.exe collage.py --out collage.png --width 6480 --video --video-out tour-2min.mp4 --duration 120 --audio-main audio\audio.m4a --audio-bg audio\background.mov
 ```
 
 ## Faster Version In C (macOS and Linux)
@@ -506,10 +587,35 @@ Create the video from an existing collage:
   --format reel --duration 50 --fps 30 --zoom 2.8
 ```
 
+Create a video with a main track and a looping background song:
+
+```bash
+./build/video --image collage.png --out tour-audio.mp4 \
+  --format reel --duration 50 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
+Create a two-minute video with audio:
+
+```bash
+./build/video --image collage.png --out tour-2min.mp4 \
+  --format reel --duration 120 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
 Create the collage and the video in one command:
 
 ```bash
 ./build/collage --out collage.png --width 6480 --video --video-out tour.mp4
+```
+
+Create the collage and a two-minute video with audio in one command:
+
+```bash
+./build/collage --out collage.png --width 6480 \
+  --video --video-out tour-2min.mp4 \
+  --duration 120 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov
 ```
 
 All the options described in "Useful Options" below work the same way for the C
@@ -591,12 +697,18 @@ command, for example:
 | `--crf N` | H.264 quality, 0–51, lower = better | `18` |
 | `--preset NAME` | x264 preset, e.g. `fast`, `medium`, `slow` | `medium` |
 | `--ffmpeg PATH` | ffmpeg binary name or full path | `ffmpeg` |
+| `--audio-main PATH` | Main audio track; enables audio when set | — |
+| `--audio-bg PATH` | Background song; enables audio when set | — |
+| `--audio-main-vol F` | Main track gain | `1.0` |
+| `--audio-bg-low F` | Background gain while the main track plays | `0.15` |
+| `--audio-bg-high F` | Background gain after the main track ends | `1.0` |
+| `--audio-fade F` | Rise and ending fade length in seconds | `1.5` |
 
 When you generate the video together with the collage (`collage … --video`), the
 video tuning options `--duration`, `--fps`, `--cycles`, `--zoom`, `--tour`, and
-`--pan-speed` are accepted too. `--format`, `--crf`, and `--preset` are available
-only on the standalone `video` program (the combined command always uses `reel`,
-crf 18, preset medium).
+`--pan-speed` are accepted too, along with the audio options above. `--format`,
+`--crf`, and `--preset` are available only on the standalone `video` program
+(the combined command always uses `reel`, crf 18, preset medium).
 
 ## Common Problems
 
@@ -625,6 +737,12 @@ Windows:
 
 ffmpeg is required for the video. Install ffmpeg, or pass the full ffmpeg path
 with `--ffmpeg`.
+
+### `ffprobe not found`
+
+ffprobe is required when `--audio-main` is used so the background rise can start
+when the main track ends. It normally installs together with ffmpeg. If needed,
+pass an ffmpeg path whose folder also contains ffprobe.
 
 ### The video looks blurry when zoomed in
 

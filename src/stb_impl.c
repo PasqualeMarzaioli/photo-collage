@@ -6,7 +6,7 @@
  * macro is defined. Keeping that here means every other source file can include
  * the headers for their declarations without producing duplicate symbols.
  *
- * Author: Pasquale Marzaioli
+ * Authors:
  */
 
 #define STB_IMAGE_IMPLEMENTATION

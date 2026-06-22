@@ -4,13 +4,15 @@
 This program takes a rendered collage, moves a vertical 9:16 camera over it with
 a smooth zoom-and-pan path, and encodes the result as an MP4.
 
-Author: Pasquale Marzaioli
+Authors:
+    Pasquale Marzaioli
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -85,6 +87,12 @@ class VideoOptions:
     preset: str
     tour: str
     pan_speed: float
+    audio_main: Path | None
+    audio_bg: Path | None
+    audio_main_vol: float
+    audio_bg_low: float
+    audio_bg_high: float
+    audio_fade: float
 
 
 @dataclass(frozen=True)
@@ -160,6 +168,161 @@ def resolve_ffmpeg(binary: str) -> str:
             "ffmpeg not found on PATH. Install it or pass `--ffmpeg <path>`."
         )
     return resolved
+
+
+def has_audio(options: VideoOptions) -> bool:
+    """Return whether the render should include any audio input."""
+
+    return options.audio_main is not None or options.audio_bg is not None
+
+
+def resolve_ffprobe(ffmpeg: str) -> str:
+    """Resolve the matching ffprobe executable for an ffmpeg command."""
+
+    ffmpeg_path = Path(ffmpeg)
+    names = {"ffmpeg": "ffprobe", "ffmpeg.exe": "ffprobe.exe"}
+    replacement = names.get(ffmpeg_path.name.lower())
+    if replacement is not None:
+        candidate = ffmpeg_path.with_name(replacement)
+        if candidate.is_file():
+            return str(candidate)
+
+    resolved = shutil.which("ffprobe")
+    if resolved is None:
+        raise VideoError(
+            "ffprobe not found on PATH. Install ffmpeg/ffprobe or pass "
+            "`--ffmpeg <path>` next to ffprobe."
+        )
+    return resolved
+
+
+def probe_audio_duration(ffmpeg: str, path: Path) -> float:
+    """Probe an audio file duration in seconds using ffprobe."""
+
+    ffprobe = resolve_ffprobe(ffmpeg)
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise VideoError(f"Could not run ffprobe for audio file: {path}") from exc
+
+    if result.returncode != 0:
+        detail = result.stderr.strip()
+        suffix = f": {detail}" if detail else ""
+        raise VideoError(f"Could not probe audio duration for {path}{suffix}")
+
+    text = result.stdout.strip()
+    try:
+        duration = float(text)
+    except ValueError as exc:
+        raise VideoError(
+            f"ffprobe did not return a valid duration for audio file: {path}"
+        ) from exc
+    if not math.isfinite(duration) or duration < 0.0:
+        raise VideoError(f"Audio duration is invalid for file: {path}")
+    return duration
+
+
+def format_ffmpeg_number(value: float) -> str:
+    """Format a float for deterministic ffmpeg filter arguments."""
+
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
+def build_audio_ffmpeg_args(options: VideoOptions, video_dur: float) -> list[str]:
+    """Build ffmpeg input, filter, and output arguments for optional audio."""
+
+    if not has_audio(options):
+        return []
+
+    args: list[str] = []
+    input_index = 1
+    bg_index: int | None = None
+    main_index: int | None = None
+
+    if options.audio_bg is not None:
+        args.extend(["-stream_loop", "-1", "-i", str(options.audio_bg)])
+        bg_index = input_index
+        input_index += 1
+
+    main_end = 0.0
+    if options.audio_main is not None:
+        args.extend(["-i", str(options.audio_main)])
+        main_index = input_index
+        main_end = probe_audio_duration(options.ffmpeg, options.audio_main)
+
+    fade = options.audio_fade
+    fade_start = max(0.0, video_dur - fade)
+    filters: list[str] = []
+
+    main_vol = format_ffmpeg_number(options.audio_main_vol)
+    bg_low = format_ffmpeg_number(options.audio_bg_low)
+    bg_high = format_ffmpeg_number(options.audio_bg_high)
+    main_end_text = format_ffmpeg_number(main_end)
+    fade_text = format_ffmpeg_number(fade)
+    video_dur_text = format_ffmpeg_number(video_dur)
+    fade_start_text = format_ffmpeg_number(fade_start)
+
+    if main_index is not None and bg_index is not None:
+        filters.append(f"[{main_index}:a]volume={main_vol}[am]")
+        if fade > 0.0:
+            ramp = (
+                f"{bg_low}+({bg_high}-{bg_low})*"
+                f"clip((t-{main_end_text})/{fade_text}\\,0\\,1)"
+            )
+        else:
+            ramp = f"{bg_low}+({bg_high}-{bg_low})*gte(t\\,{main_end_text})"
+        filters.append(f"[{bg_index}:a]volume='{ramp}':eval=frame[bg]")
+        filters.append("[am][bg]amix=inputs=2:duration=longest:normalize=0[mix]")
+        final_label = "mix"
+    elif main_index is not None:
+        filters.append(f"[{main_index}:a]volume={main_vol}[am]")
+        final_label = "am"
+    elif bg_index is not None:
+        filters.append(f"[{bg_index}:a]volume={bg_high}[bg]")
+        final_label = "bg"
+    else:
+        return []
+
+    if fade > 0.0:
+        filters.append(
+            f"[{final_label}]afade=t=out:st={fade_start_text}:d={fade_text}[aout]"
+        )
+    else:
+        filters.append(f"[{final_label}]anull[aout]")
+
+    args.extend(
+        [
+            "-filter_complex",
+            ";".join(filters),
+            "-t",
+            video_dur_text,
+            "-map",
+            "0:v",
+            "-map",
+            "[aout]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+        ]
+    )
+    return args
 
 
 def make_contain_frame(source: Image.Image, output_size: tuple[int, int]) -> Image.Image:
@@ -309,6 +472,18 @@ def validate_options(options: VideoOptions) -> None:
             f"Unsupported tour `{options.tour}`. Use one of: classic, cover.")
     if options.pan_speed <= 0:
         raise VideoError("--pan-speed must be greater than zero.")
+    if options.audio_main is not None and not options.audio_main.is_file():
+        raise VideoError(f"Audio main track not found: {options.audio_main}")
+    if options.audio_bg is not None and not options.audio_bg.is_file():
+        raise VideoError(f"Audio background track not found: {options.audio_bg}")
+    for name, value in (
+        ("--audio-main-vol", options.audio_main_vol),
+        ("--audio-bg-low", options.audio_bg_low),
+        ("--audio-bg-high", options.audio_bg_high),
+        ("--audio-fade", options.audio_fade),
+    ):
+        if not math.isfinite(value) or value < 0.0:
+            raise VideoError(f"{name} must be greater than or equal to zero.")
 
 
 def build_tour_plan(options: VideoOptions) -> TourPlan:
@@ -332,8 +507,10 @@ def render_video(options: VideoOptions) -> None:
     renderer = create_frame_renderer(options.image, output_size)
     ffmpeg_path = resolve_ffmpeg(options.ffmpeg)
     frame_count = max(1, int(round(options.duration * options.fps)))
+    video_dur = frame_count / options.fps
     tour_plan = build_tour_plan(options)
     options.out.parent.mkdir(parents=True, exist_ok=True)
+    audio_args = build_audio_ffmpeg_args(options, video_dur)
 
     command = [
         ffmpeg_path,
@@ -352,7 +529,7 @@ def render_video(options: VideoOptions) -> None:
         str(options.fps),
         "-i",
         "-",
-        "-an",
+        *(audio_args if audio_args else ["-an"]),
         "-c:v",
         "libx264",
         "-preset",
@@ -429,6 +606,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--crf", type=int,
                         help="H.264 quality, lower is better.")
     parser.add_argument("--preset", help="ffmpeg x264 preset.")
+    parser.add_argument("--audio-main", type=Path,
+                        help="Main audio track path.")
+    parser.add_argument("--audio-bg", type=Path,
+                        help="Background audio track path.")
+    parser.add_argument("--audio-main-vol", type=float,
+                        help="Main track gain (default: 1.0).")
+    parser.add_argument("--audio-bg-low", type=float,
+                        help="Background gain while the main track plays.")
+    parser.add_argument("--audio-bg-high", type=float,
+                        help="Background gain after the main track ends.")
+    parser.add_argument("--audio-fade", type=float,
+                        help="Audio rise and ending fade length in seconds.")
     return parser.parse_args(argv)
 
 
@@ -446,6 +635,14 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
     if image_value is None:
         raise VideoError(
             "--image is required unless the config provides `image`.")
+
+    audio_main_value = args.audio_main
+    if audio_main_value is None:
+        audio_main_value = video_config.get(
+            "audioMain", video_config.get("audio_main"))
+    audio_bg_value = args.audio_bg
+    if audio_bg_value is None:
+        audio_bg_value = video_config.get("audioBg", video_config.get("audio_bg"))
 
     return VideoOptions(
         image=Path(image_value),
@@ -470,6 +667,24 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
         pan_speed=args.pan_speed
         if args.pan_speed is not None
         else float(video_config.get("panSpeed", video_config.get("pan_speed", 1.0))),
+        audio_main=Path(audio_main_value) if audio_main_value is not None else None,
+        audio_bg=Path(audio_bg_value) if audio_bg_value is not None else None,
+        audio_main_vol=args.audio_main_vol
+        if args.audio_main_vol is not None
+        else float(video_config.get(
+            "audioMainVol", video_config.get("audio_main_vol", 1.0))),
+        audio_bg_low=args.audio_bg_low
+        if args.audio_bg_low is not None
+        else float(video_config.get(
+            "audioBgLow", video_config.get("audio_bg_low", 0.15))),
+        audio_bg_high=args.audio_bg_high
+        if args.audio_bg_high is not None
+        else float(video_config.get(
+            "audioBgHigh", video_config.get("audio_bg_high", 1.0))),
+        audio_fade=args.audio_fade
+        if args.audio_fade is not None
+        else float(video_config.get(
+            "audioFade", video_config.get("audio_fade", 1.5))),
     )
 
 

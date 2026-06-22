@@ -5,7 +5,8 @@
  * with a smooth zoom-and-pan path, and encodes the result as an MP4. It is a
  * thin command-line wrapper around the shared video renderer.
  *
- * Author: Pasquale Marzaioli
+ * Authors:
+ *     Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE
@@ -30,6 +31,12 @@ enum {
     OPT_PRESET,
     OPT_TOUR,
     OPT_PAN_SPEED,
+    OPT_AUDIO_MAIN,
+    OPT_AUDIO_BG,
+    OPT_AUDIO_MAIN_VOL,
+    OPT_AUDIO_BG_LOW,
+    OPT_AUDIO_BG_HIGH,
+    OPT_AUDIO_FADE,
     OPT_HELP,
 };
 
@@ -51,7 +58,13 @@ static void print_usage(void)
             "  --preset NAME   ffmpeg x264 preset (default: medium)\n"
             "  --tour NAME     Camera tour: cover (shows all photos) or classic\n"
             "                  (default: cover)\n"
-            "  --pan-speed F   Camera speed between photos, 1.0 = normal (default: 1.0)\n");
+            "  --pan-speed F   Camera speed between photos, 1.0 = normal (default: 1.0)\n"
+            "  --audio-main PATH      Main audio track path\n"
+            "  --audio-bg PATH        Background audio track path\n"
+            "  --audio-main-vol F     Main track gain (default: 1.0)\n"
+            "  --audio-bg-low F       Background gain while main plays (default: 0.15)\n"
+            "  --audio-bg-high F      Background gain after main ends (default: 1.0)\n"
+            "  --audio-fade F         Audio rise and ending fade seconds (default: 1.5)\n");
 }
 
 static bool parse_int(const char *name, const char *text, long *out)
@@ -95,6 +108,12 @@ int main(int argc, char **argv)
         .preset = "medium",
         .tour = "cover",
         .pan_speed = 1.0,
+        .audio_main = NULL,
+        .audio_bg = NULL,
+        .audio_main_vol = 1.0,
+        .audio_bg_low = 0.15,
+        .audio_bg_high = 1.0,
+        .audio_fade = 1.5,
     };
 
     static struct option long_opts[] = {
@@ -110,6 +129,12 @@ int main(int argc, char **argv)
         {"preset", required_argument, 0, OPT_PRESET},
         {"tour", required_argument, 0, OPT_TOUR},
         {"pan-speed", required_argument, 0, OPT_PAN_SPEED},
+        {"audio-main", required_argument, 0, OPT_AUDIO_MAIN},
+        {"audio-bg", required_argument, 0, OPT_AUDIO_BG},
+        {"audio-main-vol", required_argument, 0, OPT_AUDIO_MAIN_VOL},
+        {"audio-bg-low", required_argument, 0, OPT_AUDIO_BG_LOW},
+        {"audio-bg-high", required_argument, 0, OPT_AUDIO_BG_HIGH},
+        {"audio-fade", required_argument, 0, OPT_AUDIO_FADE},
         {"help", no_argument, 0, OPT_HELP},
         {0, 0, 0, 0},
     };
@@ -148,6 +173,24 @@ int main(int argc, char **argv)
         case OPT_PAN_SPEED:
             if (!parse_double("--pan-speed", optarg, &dv)) return 2;
             options.pan_speed = dv;
+            break;
+        case OPT_AUDIO_MAIN: options.audio_main = optarg; break;
+        case OPT_AUDIO_BG: options.audio_bg = optarg; break;
+        case OPT_AUDIO_MAIN_VOL:
+            if (!parse_double("--audio-main-vol", optarg, &dv)) return 2;
+            options.audio_main_vol = dv;
+            break;
+        case OPT_AUDIO_BG_LOW:
+            if (!parse_double("--audio-bg-low", optarg, &dv)) return 2;
+            options.audio_bg_low = dv;
+            break;
+        case OPT_AUDIO_BG_HIGH:
+            if (!parse_double("--audio-bg-high", optarg, &dv)) return 2;
+            options.audio_bg_high = dv;
+            break;
+        case OPT_AUDIO_FADE:
+            if (!parse_double("--audio-fade", optarg, &dv)) return 2;
+            options.audio_fade = dv;
             break;
         case OPT_HELP: print_usage(); return 0;
         default: return 2;

@@ -9,6 +9,8 @@ build/
 
 photos/*
 !photos/.gitkeep
+audio/*
+!audio/.gitkeep
 target/
 
 grid.png
@@ -19,7 +21,6 @@ collage.png
 collage.jpg
 collage-test.png
 collage-test.jpg
-tour.mp4
+*.mp4
 *.webm
 collage-config.json
-CLAUDE.md

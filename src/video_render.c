@@ -7,7 +7,8 @@
  * written to ffmpeg in order through a pipe, so encoding overlaps rendering
  * while the output stream stays sequential.
  *
- * Author: Pasquale Marzaioli
+ * Authors:
+ *     Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE
@@ -15,6 +16,7 @@
 #include "video_render.h"
 
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,6 +93,13 @@ typedef struct {
     int out_h;
     Image *contain_frame;
 } FrameRenderer;
+
+/* Growable, NULL-terminated argv storage for ffmpeg invocations. */
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ArgvBuilder;
 
 /* --- small maths helpers ------------------------------------------------ */
 
@@ -342,6 +351,281 @@ static char *resolve_ffmpeg(const char *binary)
     return NULL;
 }
 
+/*
+ * Resolve ffprobe from the selected ffmpeg path. When ffmpeg ends in the usual
+ * executable name, the sibling ffprobe is preferred; otherwise PATH is used.
+ * Returns a malloc'd path, or NULL after printing a clear error.
+ */
+static char *resolve_ffprobe(const char *ffmpeg)
+{
+    const char *slash = strrchr(ffmpeg, '/');
+    const char *name = slash != NULL ? slash + 1 : ffmpeg;
+    const char *replacement = NULL;
+    if (strcmp(name, "ffmpeg") == 0) {
+        replacement = "ffprobe";
+    } else if (strcmp(name, "ffmpeg.exe") == 0) {
+        replacement = "ffprobe.exe";
+    }
+
+    if (replacement != NULL) {
+        char candidate[4096];
+        if (slash != NULL) {
+            size_t prefix_len = (size_t)(slash - ffmpeg + 1);
+            if (prefix_len + strlen(replacement) < sizeof candidate) {
+                memcpy(candidate, ffmpeg, prefix_len);
+                strcpy(candidate + prefix_len, replacement);
+                if (access(candidate, X_OK) == 0) {
+                    return strdup(candidate);
+                }
+            }
+        } else if (access(replacement, X_OK) == 0) {
+            return strdup(replacement);
+        }
+    }
+
+    const char *path = getenv("PATH");
+    if (path != NULL) {
+        char *copy = strdup(path);
+        if (copy == NULL) {
+            return NULL;
+        }
+        char *save = NULL;
+        for (char *dir = strtok_r(copy, ":", &save); dir != NULL;
+             dir = strtok_r(NULL, ":", &save)) {
+            char full[4096];
+            snprintf(full, sizeof full, "%s/ffprobe", dir);
+            if (access(full, X_OK) == 0) {
+                char *resolved = strdup(full);
+                free(copy);
+                return resolved;
+            }
+        }
+        free(copy);
+    }
+
+    fprintf(stderr,
+            "ffprobe not found on PATH. Install ffmpeg/ffprobe or pass "
+            "`--ffmpeg <path>` next to ffprobe.\n");
+    return NULL;
+}
+
+/*
+ * Probe an audio file duration with ffprobe. ffmpeg is the selected executable
+ * path used to derive ffprobe, path is the audio file, and out_duration receives
+ * seconds on success. Returns true on success and false after printing an error.
+ */
+static bool probe_duration(const char *ffmpeg, const char *path, double *out_duration)
+{
+    char *ffprobe = resolve_ffprobe(ffmpeg);
+    if (ffprobe == NULL) {
+        return false;
+    }
+
+    int fds[2];
+    if (pipe(fds) != 0) {
+        fprintf(stderr, "Could not create ffprobe pipe.\n");
+        free(ffprobe);
+        return false;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Could not start ffprobe.\n");
+        close(fds[0]);
+        close(fds[1]);
+        free(ffprobe);
+        return false;
+    }
+    if (pid == 0) {
+        dup2(fds[1], STDOUT_FILENO);
+        close(fds[0]);
+        close(fds[1]);
+        execlp(ffprobe, ffprobe,
+               "-v", "error",
+               "-show_entries", "format=duration",
+               "-of", "default=noprint_wrappers=1:nokey=1",
+               path,
+               (char *)NULL);
+        _exit(127);
+    }
+
+    close(fds[1]);
+    char buffer[256];
+    size_t used = 0;
+    for (;;) {
+        char chunk[128];
+        ssize_t n = read(fds[0], chunk, sizeof chunk);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            fprintf(stderr, "Could not read ffprobe output.\n");
+            close(fds[0]);
+            free(ffprobe);
+            return false;
+        }
+        if (n == 0) {
+            break;
+        }
+        size_t available = sizeof buffer - 1 - used;
+        size_t copy = (size_t)n < available ? (size_t)n : available;
+        if (copy > 0) {
+            memcpy(buffer + used, chunk, copy);
+            used += copy;
+        }
+    }
+    close(fds[0]);
+    buffer[used] = '\0';
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    free(ffprobe);
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "Could not probe audio duration for %s.\n", path);
+        return false;
+    }
+
+    char *end = NULL;
+    errno = 0;
+    double value = strtod(buffer, &end);
+    if (end == buffer || errno != 0 || !isfinite(value) || value < 0.0) {
+        fprintf(stderr, "ffprobe did not return a valid duration for audio file: %s\n",
+                path);
+        return false;
+    }
+    *out_duration = value;
+    return true;
+}
+
+/*
+ * Initialise a growable argv builder. capacity is the initial number of usable
+ * argument slots, excluding the maintained NULL terminator. Returns true on
+ * success and false on allocation failure.
+ */
+static bool argv_init(ArgvBuilder *argv, size_t capacity)
+{
+    argv->count = 0;
+    argv->capacity = capacity > 0 ? capacity : 16;
+    argv->items = (char **)calloc(argv->capacity + 1, sizeof(char *));
+    return argv->items != NULL;
+}
+
+/*
+ * Append one borrowed argument pointer to a growable argv. The vector remains
+ * NULL-terminated after every successful push. Returns true on success.
+ */
+static bool argv_push(ArgvBuilder *argv, char *item)
+{
+    if (argv->count == argv->capacity) {
+        size_t next = argv->capacity * 2;
+        char **grown = (char **)realloc(argv->items, (next + 1) * sizeof(char *));
+        if (grown == NULL) {
+            return false;
+        }
+        argv->items = grown;
+        argv->capacity = next;
+    }
+    argv->items[argv->count++] = item;
+    argv->items[argv->count] = NULL;
+    return true;
+}
+
+/*
+ * Release argv storage. Argument strings are borrowed by design, so only the
+ * vector itself is freed.
+ */
+static void argv_free(ArgvBuilder *argv)
+{
+    free(argv->items);
+    argv->items = NULL;
+    argv->count = 0;
+    argv->capacity = 0;
+}
+
+/*
+ * Build the ffmpeg audio filtergraph for the requested optional audio inputs.
+ * Input indexes are ffmpeg stream indexes after the raw video pipe. The buffer
+ * receives a complete filter_complex value. Returns true on success.
+ */
+static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
+                               int bg_index, int main_index, double video_dur,
+                               char *buffer, size_t buffer_size)
+{
+    double main_end = 0.0;
+    if (main_index >= 0 &&
+        !probe_duration(ffmpeg, options->audio_main, &main_end)) {
+        return false;
+    }
+
+    double fade = options->audio_fade;
+    double fade_start = video_dur - fade;
+    if (fade_start < 0.0) {
+        fade_start = 0.0;
+    }
+
+    int written = 0;
+    if (main_index >= 0 && bg_index >= 0) {
+        if (fade > 0.0) {
+            written = snprintf(
+                buffer, buffer_size,
+                "[%d:a]volume=%.6f[am];"
+                "[%d:a]volume='%.6f+(%.6f-%.6f)*clip((t-%.6f)/%.6f\\,0\\,1)':eval=frame[bg];"
+                "[am][bg]amix=inputs=2:duration=longest:normalize=0[mix];"
+                "[mix]afade=t=out:st=%.6f:d=%.6f[aout]",
+                main_index, options->audio_main_vol,
+                bg_index, options->audio_bg_low, options->audio_bg_high,
+                options->audio_bg_low, main_end, fade,
+                fade_start, fade);
+        } else {
+            written = snprintf(
+                buffer, buffer_size,
+                "[%d:a]volume=%.6f[am];"
+                "[%d:a]volume='%.6f+(%.6f-%.6f)*gte(t\\,%.6f)':eval=frame[bg];"
+                "[am][bg]amix=inputs=2:duration=longest:normalize=0[mix];"
+                "[mix]anull[aout]",
+                main_index, options->audio_main_vol,
+                bg_index, options->audio_bg_low, options->audio_bg_high,
+                options->audio_bg_low, main_end);
+        }
+    } else if (main_index >= 0) {
+        if (fade > 0.0) {
+            written = snprintf(
+                buffer, buffer_size,
+                "[%d:a]volume=%.6f[am];"
+                "[am]afade=t=out:st=%.6f:d=%.6f[aout]",
+                main_index, options->audio_main_vol, fade_start, fade);
+        } else {
+            written = snprintf(
+                buffer, buffer_size,
+                "[%d:a]volume=%.6f[am];[am]anull[aout]",
+                main_index, options->audio_main_vol);
+        }
+    } else if (bg_index >= 0) {
+        if (fade > 0.0) {
+            written = snprintf(
+                buffer, buffer_size,
+                "[%d:a]volume=%.6f[bg];"
+                "[bg]afade=t=out:st=%.6f:d=%.6f[aout]",
+                bg_index, options->audio_bg_high, fade_start, fade);
+        } else {
+            written = snprintf(
+                buffer, buffer_size,
+                "[%d:a]volume=%.6f[bg];[bg]anull[aout]",
+                bg_index, options->audio_bg_high);
+        }
+    } else {
+        fprintf(stderr, "No audio inputs were provided for the audio filter.\n");
+        return false;
+    }
+
+    if (written < 0 || (size_t)written >= buffer_size) {
+        fprintf(stderr, "Audio filter is too long.\n");
+        return false;
+    }
+    return true;
+}
+
 /* Start ffmpeg with its stdin connected to a pipe we write frames into. */
 static pid_t spawn_ffmpeg(char *const argv[], int *write_fd)
 {
@@ -385,6 +669,16 @@ static bool write_all(int fd, const uint8_t *buf, size_t n)
 }
 
 /* --- validation --------------------------------------------------------- */
+
+/*
+ * Return whether the options request any audio stream. Empty strings are treated
+ * as absent paths because argv callers use NULL for omitted values.
+ */
+static bool has_audio(const VideoOptions *o)
+{
+    return (o->audio_main != NULL && o->audio_main[0] != '\0') ||
+           (o->audio_bg != NULL && o->audio_bg[0] != '\0');
+}
 
 static const FormatSize *find_format(const char *name)
 {
@@ -431,6 +725,32 @@ static bool validate_options(const VideoOptions *o)
     }
     if (o->pan_speed <= 0.0) {
         fprintf(stderr, "--pan-speed must be greater than zero.\n");
+        return false;
+    }
+    if (o->audio_main != NULL && o->audio_main[0] != '\0' &&
+        access(o->audio_main, F_OK) != 0) {
+        fprintf(stderr, "Audio main track not found: %s\n", o->audio_main);
+        return false;
+    }
+    if (o->audio_bg != NULL && o->audio_bg[0] != '\0' &&
+        access(o->audio_bg, F_OK) != 0) {
+        fprintf(stderr, "Audio background track not found: %s\n", o->audio_bg);
+        return false;
+    }
+    if (!isfinite(o->audio_main_vol) || o->audio_main_vol < 0.0) {
+        fprintf(stderr, "--audio-main-vol must be greater than or equal to zero.\n");
+        return false;
+    }
+    if (!isfinite(o->audio_bg_low) || o->audio_bg_low < 0.0) {
+        fprintf(stderr, "--audio-bg-low must be greater than or equal to zero.\n");
+        return false;
+    }
+    if (!isfinite(o->audio_bg_high) || o->audio_bg_high < 0.0) {
+        fprintf(stderr, "--audio-bg-high must be greater than or equal to zero.\n");
+        return false;
+    }
+    if (!isfinite(o->audio_fade) || o->audio_fade < 0.0) {
+        fprintf(stderr, "--audio-fade must be greater than or equal to zero.\n");
         return false;
     }
     return true;
@@ -498,35 +818,105 @@ bool render_video(const VideoOptions *options)
     char size_arg[32];
     char fps_arg[16];
     char crf_arg[16];
+    char duration_arg[64];
+    char audio_filter[4096];
     snprintf(size_arg, sizeof size_arg, "%dx%d", out_w, out_h);
     snprintf(fps_arg, sizeof fps_arg, "%d", options->fps);
     snprintf(crf_arg, sizeof crf_arg, "%d", options->crf);
+    double video_dur = (double)frame_count / (double)options->fps;
+    snprintf(duration_arg, sizeof duration_arg, "%.6f", video_dur);
 
-    char *argv[] = {
-        ffmpeg_path,
-        "-y",
-        "-loglevel", "error",
-        "-f", "rawvideo",
-        "-vcodec", "rawvideo",
-        "-pix_fmt", "rgb24",
-        "-s", size_arg,
-        "-r", fps_arg,
-        "-i", "-",
-        "-an",
-        "-c:v", "libx264",
-        "-preset", (char *)options->preset,
-        "-crf", crf_arg,
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        (char *)options->out,
-        NULL,
-    };
+    ArgvBuilder argv;
+    if (!argv_init(&argv, 32)) {
+        fprintf(stderr, "Out of memory building the ffmpeg command.\n");
+        free(ffmpeg_path);
+        free_frame_renderer(&renderer);
+        return false;
+    }
+
+    bool argv_ok = true;
+    argv_ok = argv_ok && argv_push(&argv, ffmpeg_path);
+    argv_ok = argv_ok && argv_push(&argv, "-y");
+    argv_ok = argv_ok && argv_push(&argv, "-loglevel");
+    argv_ok = argv_ok && argv_push(&argv, "error");
+    argv_ok = argv_ok && argv_push(&argv, "-f");
+    argv_ok = argv_ok && argv_push(&argv, "rawvideo");
+    argv_ok = argv_ok && argv_push(&argv, "-vcodec");
+    argv_ok = argv_ok && argv_push(&argv, "rawvideo");
+    argv_ok = argv_ok && argv_push(&argv, "-pix_fmt");
+    argv_ok = argv_ok && argv_push(&argv, "rgb24");
+    argv_ok = argv_ok && argv_push(&argv, "-s");
+    argv_ok = argv_ok && argv_push(&argv, size_arg);
+    argv_ok = argv_ok && argv_push(&argv, "-r");
+    argv_ok = argv_ok && argv_push(&argv, fps_arg);
+    argv_ok = argv_ok && argv_push(&argv, "-i");
+    argv_ok = argv_ok && argv_push(&argv, "-");
+
+    int bg_index = -1;
+    int main_index = -1;
+    int next_input = 1;
+    if (has_audio(options)) {
+        if (options->audio_bg != NULL && options->audio_bg[0] != '\0') {
+            bg_index = next_input++;
+            argv_ok = argv_ok && argv_push(&argv, "-stream_loop");
+            argv_ok = argv_ok && argv_push(&argv, "-1");
+            argv_ok = argv_ok && argv_push(&argv, "-i");
+            argv_ok = argv_ok && argv_push(&argv, (char *)options->audio_bg);
+        }
+        if (options->audio_main != NULL && options->audio_main[0] != '\0') {
+            main_index = next_input++;
+            argv_ok = argv_ok && argv_push(&argv, "-i");
+            argv_ok = argv_ok && argv_push(&argv, (char *)options->audio_main);
+        }
+        if (argv_ok &&
+            !build_audio_filter(options, ffmpeg_path, bg_index, main_index,
+                                video_dur, audio_filter, sizeof audio_filter)) {
+            argv_free(&argv);
+            free(ffmpeg_path);
+            free_frame_renderer(&renderer);
+            return false;
+        }
+        argv_ok = argv_ok && argv_push(&argv, "-filter_complex");
+        argv_ok = argv_ok && argv_push(&argv, audio_filter);
+        argv_ok = argv_ok && argv_push(&argv, "-t");
+        argv_ok = argv_ok && argv_push(&argv, duration_arg);
+        argv_ok = argv_ok && argv_push(&argv, "-map");
+        argv_ok = argv_ok && argv_push(&argv, "0:v");
+        argv_ok = argv_ok && argv_push(&argv, "-map");
+        argv_ok = argv_ok && argv_push(&argv, "[aout]");
+        argv_ok = argv_ok && argv_push(&argv, "-c:a");
+        argv_ok = argv_ok && argv_push(&argv, "aac");
+        argv_ok = argv_ok && argv_push(&argv, "-b:a");
+        argv_ok = argv_ok && argv_push(&argv, "192k");
+    } else {
+        argv_ok = argv_ok && argv_push(&argv, "-an");
+    }
+
+    argv_ok = argv_ok && argv_push(&argv, "-c:v");
+    argv_ok = argv_ok && argv_push(&argv, "libx264");
+    argv_ok = argv_ok && argv_push(&argv, "-preset");
+    argv_ok = argv_ok && argv_push(&argv, (char *)options->preset);
+    argv_ok = argv_ok && argv_push(&argv, "-crf");
+    argv_ok = argv_ok && argv_push(&argv, crf_arg);
+    argv_ok = argv_ok && argv_push(&argv, "-pix_fmt");
+    argv_ok = argv_ok && argv_push(&argv, "yuv420p");
+    argv_ok = argv_ok && argv_push(&argv, "-movflags");
+    argv_ok = argv_ok && argv_push(&argv, "+faststart");
+    argv_ok = argv_ok && argv_push(&argv, (char *)options->out);
+    if (!argv_ok) {
+        fprintf(stderr, "Out of memory building the ffmpeg command.\n");
+        argv_free(&argv);
+        free(ffmpeg_path);
+        free_frame_renderer(&renderer);
+        return false;
+    }
 
     /* A dead ffmpeg should surface as a write error, not a fatal signal. */
     signal(SIGPIPE, SIG_IGN);
 
     int write_fd = -1;
-    pid_t pid = spawn_ffmpeg(argv, &write_fd);
+    pid_t pid = spawn_ffmpeg(argv.items, &write_fd);
+    argv_free(&argv);
     if (pid < 0) {
         fprintf(stderr, "Could not start ffmpeg.\n");
         free(ffmpeg_path);

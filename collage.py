@@ -5,7 +5,8 @@ This program reads supported images from the photos folder, places each photo
 exactly once into a connected vertical collage, and can optionally render a
 zoom-tour video from the generated collage.
 
-Author: Pasquale Marzaioli
+Authors:
+    Pasquale Marzaioli
 """
 
 from __future__ import annotations
@@ -88,6 +89,12 @@ class CollageOptions:
     video_tour: str
     video_pan_speed: float
     ffmpeg: str
+    audio_main: Path | None
+    audio_bg: Path | None
+    audio_main_vol: float
+    audio_bg_low: float
+    audio_bg_high: float
+    audio_fade: float
 
 
 def parse_color(value: str | Iterable[int]) -> tuple[int, int, int]:
@@ -349,6 +356,12 @@ def render_optional_video(options: CollageOptions, image_path: Path) -> None:
                 preset="medium",
                 tour=options.video_tour,
                 pan_speed=options.video_pan_speed,
+                audio_main=options.audio_main,
+                audio_bg=options.audio_bg,
+                audio_main_vol=options.audio_main_vol,
+                audio_bg_low=options.audio_bg_low,
+                audio_bg_high=options.audio_bg_high,
+                audio_fade=options.audio_fade,
             )
         )
     except Exception as exc:
@@ -403,6 +416,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Camera speed between photos, 1.0 = normal.")
     parser.add_argument("--ffmpeg", default="ffmpeg",
                         help="ffmpeg binary or absolute path.")
+    parser.add_argument("--audio-main", type=Path,
+                        help="Main audio track path for --video.")
+    parser.add_argument("--audio-bg", type=Path,
+                        help="Background audio track path for --video.")
+    parser.add_argument("--audio-main-vol", type=float, default=1.0,
+                        help="Main track gain for --video.")
+    parser.add_argument("--audio-bg-low", type=float, default=0.15,
+                        help="Background gain while the main track plays.")
+    parser.add_argument("--audio-bg-high", type=float, default=1.0,
+                        help="Background gain after the main track ends.")
+    parser.add_argument("--audio-fade", type=float, default=1.5,
+                        help="Audio rise and ending fade length in seconds.")
     return parser.parse_args(argv)
 
 
@@ -434,6 +459,12 @@ def options_from_args(args: argparse.Namespace) -> CollageOptions:
         video_tour=args.tour,
         video_pan_speed=args.pan_speed,
         ffmpeg=args.ffmpeg,
+        audio_main=args.audio_main,
+        audio_bg=args.audio_bg,
+        audio_main_vol=args.audio_main_vol,
+        audio_bg_low=args.audio_bg_low,
+        audio_bg_high=args.audio_bg_high,
+        audio_fade=args.audio_fade,
     )
 
 

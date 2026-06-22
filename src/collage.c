@@ -5,7 +5,8 @@
  * exactly once into a connected vertical 9:16 collage, and can optionally render
  * a zoom-tour video from the generated collage.
  *
- * Author: Pasquale Marzaioli
+ * Authors:
+ *     Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE
@@ -54,6 +55,12 @@ typedef struct {
     const char *video_tour;
     double video_pan_speed;
     const char *ffmpeg;
+    const char *audio_main;
+    const char *audio_bg;
+    double audio_main_vol;
+    double audio_bg_low;
+    double audio_bg_high;
+    double audio_fade;
 } CollageOptions;
 
 /* Final canvas and no-repeat row layout in output pixels. */
@@ -442,6 +449,12 @@ static bool render_optional_video(const CollageOptions *options)
         .preset = "medium",
         .tour = options->video_tour,
         .pan_speed = options->video_pan_speed,
+        .audio_main = options->audio_main,
+        .audio_bg = options->audio_bg,
+        .audio_main_vol = options->audio_main_vol,
+        .audio_bg_low = options->audio_bg_low,
+        .audio_bg_high = options->audio_bg_high,
+        .audio_fade = options->audio_fade,
     };
     if (!render_video(&video)) {
         fprintf(stderr, "Video rendering failed.\n");
@@ -530,6 +543,12 @@ enum {
     OPT_TOUR,
     OPT_PAN_SPEED,
     OPT_FFMPEG,
+    OPT_AUDIO_MAIN,
+    OPT_AUDIO_BG,
+    OPT_AUDIO_MAIN_VOL,
+    OPT_AUDIO_BG_LOW,
+    OPT_AUDIO_BG_HIGH,
+    OPT_AUDIO_FADE,
     OPT_HELP,
 };
 
@@ -558,7 +577,13 @@ static void print_usage(void)
             "  --tour NAME        Camera tour: cover (shows all photos) or classic\n"
             "                     (default: cover)\n"
             "  --pan-speed F      Camera speed between photos, 1.0 = normal (default: 1.0)\n"
-            "  --ffmpeg PATH      ffmpeg binary or absolute path\n");
+            "  --ffmpeg PATH      ffmpeg binary or absolute path\n"
+            "  --audio-main PATH  Main audio track path for --video\n"
+            "  --audio-bg PATH    Background audio track path for --video\n"
+            "  --audio-main-vol F Main track gain for --video (default: 1.0)\n"
+            "  --audio-bg-low F   Background gain while main plays (default: 0.15)\n"
+            "  --audio-bg-high F  Background gain after main ends (default: 1.0)\n"
+            "  --audio-fade F     Audio rise and ending fade seconds (default: 1.5)\n");
 }
 
 /* Parse an integer option value; on error print a message and return false. */
@@ -612,6 +637,12 @@ int main(int argc, char **argv)
     options.video_tour = "cover";
     options.video_pan_speed = 1.0;
     options.ffmpeg = "ffmpeg";
+    options.audio_main = NULL;
+    options.audio_bg = NULL;
+    options.audio_main_vol = 1.0;
+    options.audio_bg_low = 0.15;
+    options.audio_bg_high = 1.0;
+    options.audio_fade = 1.5;
 
     int width_arg = -1;     /* unset */
     double scale_arg = NAN; /* unset */
@@ -638,6 +669,12 @@ int main(int argc, char **argv)
         {"tour", required_argument, 0, OPT_TOUR},
         {"pan-speed", required_argument, 0, OPT_PAN_SPEED},
         {"ffmpeg", required_argument, 0, OPT_FFMPEG},
+        {"audio-main", required_argument, 0, OPT_AUDIO_MAIN},
+        {"audio-bg", required_argument, 0, OPT_AUDIO_BG},
+        {"audio-main-vol", required_argument, 0, OPT_AUDIO_MAIN_VOL},
+        {"audio-bg-low", required_argument, 0, OPT_AUDIO_BG_LOW},
+        {"audio-bg-high", required_argument, 0, OPT_AUDIO_BG_HIGH},
+        {"audio-fade", required_argument, 0, OPT_AUDIO_FADE},
         {"help", no_argument, 0, OPT_HELP},
         {0, 0, 0, 0},
     };
@@ -699,6 +736,24 @@ int main(int argc, char **argv)
             options.video_pan_speed = dv;
             break;
         case OPT_FFMPEG: options.ffmpeg = optarg; break;
+        case OPT_AUDIO_MAIN: options.audio_main = optarg; break;
+        case OPT_AUDIO_BG: options.audio_bg = optarg; break;
+        case OPT_AUDIO_MAIN_VOL:
+            if (!parse_double("--audio-main-vol", optarg, &dv)) return 2;
+            options.audio_main_vol = dv;
+            break;
+        case OPT_AUDIO_BG_LOW:
+            if (!parse_double("--audio-bg-low", optarg, &dv)) return 2;
+            options.audio_bg_low = dv;
+            break;
+        case OPT_AUDIO_BG_HIGH:
+            if (!parse_double("--audio-bg-high", optarg, &dv)) return 2;
+            options.audio_bg_high = dv;
+            break;
+        case OPT_AUDIO_FADE:
+            if (!parse_double("--audio-fade", optarg, &dv)) return 2;
+            options.audio_fade = dv;
+            break;
         case OPT_HELP: print_usage(); return 0;
         default: return 2;
         }
