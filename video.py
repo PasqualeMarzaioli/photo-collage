@@ -5,7 +5,6 @@ This program takes a rendered collage, moves a vertical 9:16 camera over it with
 a smooth zoom-and-pan path, and encodes the result as an MP4.
 
 Author: Pasquale Marzaioli
-    Pasquale Marzaioli
 """
 
 from __future__ import annotations
@@ -218,7 +217,8 @@ def probe_audio_duration(ffmpeg: str, path: Path) -> float:
             text=True,
         )
     except OSError as exc:
-        raise VideoError(f"Could not run ffprobe for audio file: {path}") from exc
+        raise VideoError(
+            f"Could not run ffprobe for audio file: {path}") from exc
 
     if result.returncode != 0:
         detail = result.stderr.strip()
@@ -288,7 +288,8 @@ def build_audio_ffmpeg_args(options: VideoOptions, video_dur: float) -> list[str
         else:
             ramp = f"{bg_low}+({bg_high}-{bg_low})*gte(t\\,{main_end_text})"
         filters.append(f"[{bg_index}:a]volume='{ramp}':eval=frame[bg]")
-        filters.append("[am][bg]amix=inputs=2:duration=longest:normalize=0[mix]")
+        filters.append(
+            "[am][bg]amix=inputs=2:duration=longest:normalize=0[mix]")
         final_label = "mix"
     elif main_index is not None:
         filters.append(f"[{main_index}:a]volume={main_vol}[am]")
@@ -475,7 +476,8 @@ def validate_options(options: VideoOptions) -> None:
     if options.audio_main is not None and not options.audio_main.is_file():
         raise VideoError(f"Audio main track not found: {options.audio_main}")
     if options.audio_bg is not None and not options.audio_bg.is_file():
-        raise VideoError(f"Audio background track not found: {options.audio_bg}")
+        raise VideoError(
+            f"Audio background track not found: {options.audio_bg}")
     for name, value in (
         ("--audio-main-vol", options.audio_main_vol),
         ("--audio-bg-low", options.audio_bg_low),
@@ -642,7 +644,8 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
             "audioMain", video_config.get("audio_main"))
     audio_bg_value = args.audio_bg
     if audio_bg_value is None:
-        audio_bg_value = video_config.get("audioBg", video_config.get("audio_bg"))
+        audio_bg_value = video_config.get(
+            "audioBg", video_config.get("audio_bg"))
 
     return VideoOptions(
         image=Path(image_value),
@@ -667,7 +670,8 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
         pan_speed=args.pan_speed
         if args.pan_speed is not None
         else float(video_config.get("panSpeed", video_config.get("pan_speed", 1.0))),
-        audio_main=Path(audio_main_value) if audio_main_value is not None else None,
+        audio_main=Path(
+            audio_main_value) if audio_main_value is not None else None,
         audio_bg=Path(audio_bg_value) if audio_bg_value is not None else None,
         audio_main_vol=args.audio_main_vol
         if args.audio_main_vol is not None

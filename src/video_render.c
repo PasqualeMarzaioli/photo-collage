@@ -8,7 +8,6 @@
  * while the output stream stays sequential.
  *
  * Author: Pasquale Marzaioli
- *     Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE
@@ -28,7 +27,8 @@
 #include "parallel.h"
 
 /* Output frame sizes for each supported format. */
-typedef struct {
+typedef struct
+{
     const char *name;
     int width;
     int height;
@@ -60,15 +60,30 @@ static const int kAnchorCount = (int)(sizeof(kAnchors) / sizeof(kAnchors[0]));
  * the centre for a clean closing pull-back.
  */
 static const double kCoverAnchors[][2] = {
-    {0.30, 0.14}, {0.70, 0.12}, {0.85, 0.24}, {0.50, 0.28}, {0.16, 0.26},
-    {0.22, 0.42}, {0.55, 0.40}, {0.80, 0.46}, {0.40, 0.54}, {0.68, 0.60},
-    {0.84, 0.66}, {0.30, 0.64}, {0.18, 0.74}, {0.52, 0.72}, {0.74, 0.80},
-    {0.38, 0.84}, {0.62, 0.88}, {0.50, 0.50},
+    {0.30, 0.14},
+    {0.70, 0.12},
+    {0.85, 0.24},
+    {0.50, 0.28},
+    {0.16, 0.26},
+    {0.22, 0.42},
+    {0.55, 0.40},
+    {0.80, 0.46},
+    {0.40, 0.54},
+    {0.68, 0.60},
+    {0.84, 0.66},
+    {0.30, 0.64},
+    {0.18, 0.74},
+    {0.52, 0.72},
+    {0.74, 0.80},
+    {0.38, 0.84},
+    {0.62, 0.88},
+    {0.50, 0.50},
 };
 static const int kCoverAnchorCount = (int)(sizeof(kCoverAnchors) / sizeof(kCoverAnchors[0]));
 
 /* One frame's camera mode, normalised centre, and crop zoom. */
-typedef struct {
+typedef struct
+{
     int is_contain; /* non-zero shows the full collage instead of a crop */
     double cx;
     double cy;
@@ -78,7 +93,8 @@ typedef struct {
 /* The active tour: which anchor set to wander, how many segments to cross, and
    how fast. base_segments is the number of anchor-to-anchor hops spread across
    the tour at pan_speed 1.0 (the full cover set, or `cycles` for classic). */
-typedef struct {
+typedef struct
+{
     const double (*anchors)[2];
     int anchor_count;
     int base_segments;
@@ -87,7 +103,8 @@ typedef struct {
 } TourPlan;
 
 /* Cached source imagery and the reusable wide "contain" frame. */
-typedef struct {
+typedef struct
+{
     Image *source;
     int out_w;
     int out_h;
@@ -95,7 +112,8 @@ typedef struct {
 } FrameRenderer;
 
 /* Growable, NULL-terminated argv storage for ffmpeg invocations. */
-typedef struct {
+typedef struct
+{
     char **items;
     size_t count;
     size_t capacity;
@@ -105,10 +123,12 @@ typedef struct {
 
 static double clampd(double value, double lo, double hi)
 {
-    if (value < lo) {
+    if (value < lo)
+    {
         return lo;
     }
-    if (value > hi) {
+    if (value > hi)
+    {
         return hi;
     }
     return value;
@@ -155,11 +175,13 @@ static CameraState get_camera_state(double progress, const TourPlan *plan)
     int base = plan->base_segments > 1 ? plan->base_segments : 1;
     double speed = plan->pan_speed > 0.0 ? plan->pan_speed : 1.0;
 
-    if (progress <= open_hold) {
+    if (progress <= open_hold)
+    {
         return make_state(1, 0.5, 0.5, 1.0);
     }
 
-    if (progress < zoom_in_end) {
+    if (progress < zoom_in_end)
+    {
         double amount = smoothstep((progress - open_hold) / (zoom_in_end - open_hold));
         double cx = lerp(0.5, anchors[1][0], amount);
         double cy = lerp(0.5, anchors[1][1], amount);
@@ -167,7 +189,8 @@ static CameraState get_camera_state(double progress, const TourPlan *plan)
         return make_state(0, cx, cy, zoom);
     }
 
-    if (progress >= close_start) {
+    if (progress >= close_start)
+    {
         double amount = smoothstep((progress - close_start) / (1.0 - close_start));
         /* Continue the pull-back from wherever the tour ended (no jump). */
         int last_seg = (int)(base * speed);
@@ -175,7 +198,8 @@ static CameraState get_camera_state(double progress, const TourPlan *plan)
         double cx = lerp(anchors[si][0], 0.5, amount);
         double cy = lerp(anchors[si][1], 0.5, amount);
         double zoom = lerp(tour_zoom, 1.0, amount);
-        if (progress >= 0.999) {
+        if (progress >= 0.999)
+        {
             return make_state(1, 0.5, 0.5, 1.0);
         }
         return make_state(0, cx, cy, zoom);
@@ -202,13 +226,15 @@ static CameraState get_camera_state(double progress, const TourPlan *plan)
 static Image *make_contain_frame(const Image *source, int out_w, int out_h)
 {
     Image *background = image_fit_cover(source, out_w, out_h);
-    if (background == NULL) {
+    if (background == NULL)
+    {
         return NULL;
     }
     gaussian_blur(background, 28.0);
 
     Image *white = image_new(out_w, out_h, 3);
-    if (white == NULL) {
+    if (white == NULL)
+    {
         image_free(background);
         return NULL;
     }
@@ -217,7 +243,8 @@ static Image *make_contain_frame(const Image *source, int out_w, int out_h)
     image_free(white);
 
     Image *contained = image_fit_contain(source, out_w, out_h);
-    if (contained == NULL) {
+    if (contained == NULL)
+    {
         image_free(background);
         return NULL;
     }
@@ -232,21 +259,25 @@ static Image *make_contain_frame(const Image *source, int out_w, int out_h)
 static bool create_frame_renderer(const char *path, int out_w, int out_h,
                                   FrameRenderer *renderer)
 {
-    if (access(path, F_OK) != 0) {
+    if (access(path, F_OK) != 0)
+    {
         fprintf(stderr, "Input image not found: %s\n", path);
         return false;
     }
     Image *source = image_load(path);
-    if (source == NULL) {
+    if (source == NULL)
+    {
         return false; /* image_load already reported the reason */
     }
-    if (source->width < 2 || source->height < 2) {
+    if (source->width < 2 || source->height < 2)
+    {
         fprintf(stderr, "Input image is too small to render a video.\n");
         image_free(source);
         return false;
     }
     Image *contain_frame = make_contain_frame(source, out_w, out_h);
-    if (contain_frame == NULL) {
+    if (contain_frame == NULL)
+    {
         fprintf(stderr, "Out of memory preparing the video background.\n");
         image_free(source);
         return false;
@@ -275,10 +306,13 @@ static Image *crop_frame(const FrameRenderer *renderer, const CameraState *state
 
     double max_w;
     double max_h;
-    if (src_aspect >= out_aspect) {
+    if (src_aspect >= out_aspect)
+    {
         max_h = src->height;
         max_w = max_h * out_aspect;
-    } else {
+    }
+    else
+    {
         max_w = src->width;
         max_h = max_w / out_aspect;
     }
@@ -295,10 +329,12 @@ static Image *crop_frame(const FrameRenderer *renderer, const CameraState *state
     double top = py_round(cy - viewport_h / 2.0);
     double right = py_round(cx + viewport_w / 2.0);
     double bottom = py_round(cy + viewport_h / 2.0);
-    if (right < left + 1) {
+    if (right < left + 1)
+    {
         right = left + 1;
     }
-    if (bottom < top + 1) {
+    if (bottom < top + 1)
+    {
         bottom = top + 1;
     }
     return resample_region(src, left, top, right - left, bottom - top,
@@ -308,7 +344,8 @@ static Image *crop_frame(const FrameRenderer *renderer, const CameraState *state
 /* Render a single frame for a camera state. Returns NULL on allocation failure. */
 static Image *render_frame(const FrameRenderer *renderer, const CameraState *state)
 {
-    if (state->is_contain) {
+    if (state->is_contain)
+    {
         return image_copy(renderer->contain_frame);
     }
     return crop_frame(renderer, state);
@@ -319,8 +356,10 @@ static Image *render_frame(const FrameRenderer *renderer, const CameraState *sta
 /* Resolve an ffmpeg executable from a path or a PATH lookup; caller frees. */
 static char *resolve_ffmpeg(const char *binary)
 {
-    if (strchr(binary, '/') != NULL) {
-        if (access(binary, X_OK) == 0) {
+    if (strchr(binary, '/') != NULL)
+    {
+        if (access(binary, X_OK) == 0)
+        {
             return strdup(binary);
         }
         fprintf(stderr,
@@ -328,17 +367,21 @@ static char *resolve_ffmpeg(const char *binary)
         return NULL;
     }
     const char *path = getenv("PATH");
-    if (path != NULL) {
+    if (path != NULL)
+    {
         char *copy = strdup(path);
-        if (copy == NULL) {
+        if (copy == NULL)
+        {
             return NULL;
         }
         char *save = NULL;
         for (char *dir = strtok_r(copy, ":", &save); dir != NULL;
-             dir = strtok_r(NULL, ":", &save)) {
+             dir = strtok_r(NULL, ":", &save))
+        {
             char full[4096];
             snprintf(full, sizeof full, "%s/%s", dir, binary);
-            if (access(full, X_OK) == 0) {
+            if (access(full, X_OK) == 0)
+            {
                 char *resolved = strdup(full);
                 free(copy);
                 return resolved;
@@ -361,40 +404,53 @@ static char *resolve_ffprobe(const char *ffmpeg)
     const char *slash = strrchr(ffmpeg, '/');
     const char *name = slash != NULL ? slash + 1 : ffmpeg;
     const char *replacement = NULL;
-    if (strcmp(name, "ffmpeg") == 0) {
+    if (strcmp(name, "ffmpeg") == 0)
+    {
         replacement = "ffprobe";
-    } else if (strcmp(name, "ffmpeg.exe") == 0) {
+    }
+    else if (strcmp(name, "ffmpeg.exe") == 0)
+    {
         replacement = "ffprobe.exe";
     }
 
-    if (replacement != NULL) {
+    if (replacement != NULL)
+    {
         char candidate[4096];
-        if (slash != NULL) {
+        if (slash != NULL)
+        {
             size_t prefix_len = (size_t)(slash - ffmpeg + 1);
-            if (prefix_len + strlen(replacement) < sizeof candidate) {
+            if (prefix_len + strlen(replacement) < sizeof candidate)
+            {
                 memcpy(candidate, ffmpeg, prefix_len);
                 strcpy(candidate + prefix_len, replacement);
-                if (access(candidate, X_OK) == 0) {
+                if (access(candidate, X_OK) == 0)
+                {
                     return strdup(candidate);
                 }
             }
-        } else if (access(replacement, X_OK) == 0) {
+        }
+        else if (access(replacement, X_OK) == 0)
+        {
             return strdup(replacement);
         }
     }
 
     const char *path = getenv("PATH");
-    if (path != NULL) {
+    if (path != NULL)
+    {
         char *copy = strdup(path);
-        if (copy == NULL) {
+        if (copy == NULL)
+        {
             return NULL;
         }
         char *save = NULL;
         for (char *dir = strtok_r(copy, ":", &save); dir != NULL;
-             dir = strtok_r(NULL, ":", &save)) {
+             dir = strtok_r(NULL, ":", &save))
+        {
             char full[4096];
             snprintf(full, sizeof full, "%s/ffprobe", dir);
-            if (access(full, X_OK) == 0) {
+            if (access(full, X_OK) == 0)
+            {
                 char *resolved = strdup(full);
                 free(copy);
                 return resolved;
@@ -417,26 +473,30 @@ static char *resolve_ffprobe(const char *ffmpeg)
 static bool probe_duration(const char *ffmpeg, const char *path, double *out_duration)
 {
     char *ffprobe = resolve_ffprobe(ffmpeg);
-    if (ffprobe == NULL) {
+    if (ffprobe == NULL)
+    {
         return false;
     }
 
     int fds[2];
-    if (pipe(fds) != 0) {
+    if (pipe(fds) != 0)
+    {
         fprintf(stderr, "Could not create ffprobe pipe.\n");
         free(ffprobe);
         return false;
     }
 
     pid_t pid = fork();
-    if (pid < 0) {
+    if (pid < 0)
+    {
         fprintf(stderr, "Could not start ffprobe.\n");
         close(fds[0]);
         close(fds[1]);
         free(ffprobe);
         return false;
     }
-    if (pid == 0) {
+    if (pid == 0)
+    {
         dup2(fds[1], STDOUT_FILENO);
         close(fds[0]);
         close(fds[1]);
@@ -452,11 +512,14 @@ static bool probe_duration(const char *ffmpeg, const char *path, double *out_dur
     close(fds[1]);
     char buffer[256];
     size_t used = 0;
-    for (;;) {
+    for (;;)
+    {
         char chunk[128];
         ssize_t n = read(fds[0], chunk, sizeof chunk);
-        if (n < 0) {
-            if (errno == EINTR) {
+        if (n < 0)
+        {
+            if (errno == EINTR)
+            {
                 continue;
             }
             fprintf(stderr, "Could not read ffprobe output.\n");
@@ -464,12 +527,14 @@ static bool probe_duration(const char *ffmpeg, const char *path, double *out_dur
             free(ffprobe);
             return false;
         }
-        if (n == 0) {
+        if (n == 0)
+        {
             break;
         }
         size_t available = sizeof buffer - 1 - used;
         size_t copy = (size_t)n < available ? (size_t)n : available;
-        if (copy > 0) {
+        if (copy > 0)
+        {
             memcpy(buffer + used, chunk, copy);
             used += copy;
         }
@@ -481,7 +546,8 @@ static bool probe_duration(const char *ffmpeg, const char *path, double *out_dur
     waitpid(pid, &status, 0);
     free(ffprobe);
 
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    {
         fprintf(stderr, "Could not probe audio duration for %s.\n", path);
         return false;
     }
@@ -489,7 +555,8 @@ static bool probe_duration(const char *ffmpeg, const char *path, double *out_dur
     char *end = NULL;
     errno = 0;
     double value = strtod(buffer, &end);
-    if (end == buffer || errno != 0 || !isfinite(value) || value < 0.0) {
+    if (end == buffer || errno != 0 || !isfinite(value) || value < 0.0)
+    {
         fprintf(stderr, "ffprobe did not return a valid duration for audio file: %s\n",
                 path);
         return false;
@@ -517,10 +584,12 @@ static bool argv_init(ArgvBuilder *argv, size_t capacity)
  */
 static bool argv_push(ArgvBuilder *argv, char *item)
 {
-    if (argv->count == argv->capacity) {
+    if (argv->count == argv->capacity)
+    {
         size_t next = argv->capacity * 2;
         char **grown = (char **)realloc(argv->items, (next + 1) * sizeof(char *));
-        if (grown == NULL) {
+        if (grown == NULL)
+        {
             return false;
         }
         argv->items = grown;
@@ -554,19 +623,23 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
 {
     double main_end = 0.0;
     if (main_index >= 0 &&
-        !probe_duration(ffmpeg, options->audio_main, &main_end)) {
+        !probe_duration(ffmpeg, options->audio_main, &main_end))
+    {
         return false;
     }
 
     double fade = options->audio_fade;
     double fade_start = video_dur - fade;
-    if (fade_start < 0.0) {
+    if (fade_start < 0.0)
+    {
         fade_start = 0.0;
     }
 
     int written = 0;
-    if (main_index >= 0 && bg_index >= 0) {
-        if (fade > 0.0) {
+    if (main_index >= 0 && bg_index >= 0)
+    {
+        if (fade > 0.0)
+        {
             written = snprintf(
                 buffer, buffer_size,
                 "[%d:a]volume=%.6f[am];"
@@ -577,7 +650,9 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
                 bg_index, options->audio_bg_low, options->audio_bg_high,
                 options->audio_bg_low, main_end, fade,
                 fade_start, fade);
-        } else {
+        }
+        else
+        {
             written = snprintf(
                 buffer, buffer_size,
                 "[%d:a]volume=%.6f[am];"
@@ -588,38 +663,51 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
                 bg_index, options->audio_bg_low, options->audio_bg_high,
                 options->audio_bg_low, main_end);
         }
-    } else if (main_index >= 0) {
-        if (fade > 0.0) {
+    }
+    else if (main_index >= 0)
+    {
+        if (fade > 0.0)
+        {
             written = snprintf(
                 buffer, buffer_size,
                 "[%d:a]volume=%.6f[am];"
                 "[am]afade=t=out:st=%.6f:d=%.6f[aout]",
                 main_index, options->audio_main_vol, fade_start, fade);
-        } else {
+        }
+        else
+        {
             written = snprintf(
                 buffer, buffer_size,
                 "[%d:a]volume=%.6f[am];[am]anull[aout]",
                 main_index, options->audio_main_vol);
         }
-    } else if (bg_index >= 0) {
-        if (fade > 0.0) {
+    }
+    else if (bg_index >= 0)
+    {
+        if (fade > 0.0)
+        {
             written = snprintf(
                 buffer, buffer_size,
                 "[%d:a]volume=%.6f[bg];"
                 "[bg]afade=t=out:st=%.6f:d=%.6f[aout]",
                 bg_index, options->audio_bg_high, fade_start, fade);
-        } else {
+        }
+        else
+        {
             written = snprintf(
                 buffer, buffer_size,
                 "[%d:a]volume=%.6f[bg];[bg]anull[aout]",
                 bg_index, options->audio_bg_high);
         }
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "No audio inputs were provided for the audio filter.\n");
         return false;
     }
 
-    if (written < 0 || (size_t)written >= buffer_size) {
+    if (written < 0 || (size_t)written >= buffer_size)
+    {
         fprintf(stderr, "Audio filter is too long.\n");
         return false;
     }
@@ -630,16 +718,19 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
 static pid_t spawn_ffmpeg(char *const argv[], int *write_fd)
 {
     int fds[2];
-    if (pipe(fds) != 0) {
+    if (pipe(fds) != 0)
+    {
         return -1;
     }
     pid_t pid = fork();
-    if (pid < 0) {
+    if (pid < 0)
+    {
         close(fds[0]);
         close(fds[1]);
         return -1;
     }
-    if (pid == 0) {
+    if (pid == 0)
+    {
         dup2(fds[0], STDIN_FILENO);
         close(fds[0]);
         close(fds[1]);
@@ -655,10 +746,13 @@ static pid_t spawn_ffmpeg(char *const argv[], int *write_fd)
 static bool write_all(int fd, const uint8_t *buf, size_t n)
 {
     size_t offset = 0;
-    while (offset < n) {
+    while (offset < n)
+    {
         ssize_t written = write(fd, buf + offset, n - offset);
-        if (written < 0) {
-            if (errno == EINTR) {
+        if (written < 0)
+        {
+            if (errno == EINTR)
+            {
                 continue;
             }
             return false;
@@ -682,8 +776,10 @@ static bool has_audio(const VideoOptions *o)
 
 static const FormatSize *find_format(const char *name)
 {
-    for (int i = 0; i < kFormatCount; ++i) {
-        if (strcmp(kFormats[i].name, name) == 0) {
+    for (int i = 0; i < kFormatCount; ++i)
+    {
+        if (strcmp(kFormats[i].name, name) == 0)
+        {
             return &kFormats[i];
         }
     }
@@ -692,64 +788,78 @@ static const FormatSize *find_format(const char *name)
 
 static bool validate_options(const VideoOptions *o)
 {
-    if (find_format(o->format) == NULL) {
+    if (find_format(o->format) == NULL)
+    {
         fprintf(stderr,
                 "Unsupported format `%s`. Use one of: feed, reel, square.\n",
                 o->format);
         return false;
     }
-    if (o->duration <= 0.0) {
+    if (o->duration <= 0.0)
+    {
         fprintf(stderr, "--duration must be greater than zero.\n");
         return false;
     }
-    if (o->fps <= 0 || o->fps > 120) {
+    if (o->fps <= 0 || o->fps > 120)
+    {
         fprintf(stderr, "--fps must be between 1 and 120.\n");
         return false;
     }
-    if (o->cycles <= 0) {
+    if (o->cycles <= 0)
+    {
         fprintf(stderr, "--cycles must be greater than zero.\n");
         return false;
     }
-    if (o->zoom < 1.0) {
+    if (o->zoom < 1.0)
+    {
         fprintf(stderr, "--zoom must be at least 1.0.\n");
         return false;
     }
-    if (o->crf < 0 || o->crf > 51) {
+    if (o->crf < 0 || o->crf > 51)
+    {
         fprintf(stderr, "--crf must be between 0 and 51.\n");
         return false;
     }
-    if (strcmp(o->tour, "cover") != 0 && strcmp(o->tour, "classic") != 0) {
+    if (strcmp(o->tour, "cover") != 0 && strcmp(o->tour, "classic") != 0)
+    {
         fprintf(stderr, "Unsupported tour `%s`. Use one of: classic, cover.\n",
                 o->tour);
         return false;
     }
-    if (o->pan_speed <= 0.0) {
+    if (o->pan_speed <= 0.0)
+    {
         fprintf(stderr, "--pan-speed must be greater than zero.\n");
         return false;
     }
     if (o->audio_main != NULL && o->audio_main[0] != '\0' &&
-        access(o->audio_main, F_OK) != 0) {
+        access(o->audio_main, F_OK) != 0)
+    {
         fprintf(stderr, "Audio main track not found: %s\n", o->audio_main);
         return false;
     }
     if (o->audio_bg != NULL && o->audio_bg[0] != '\0' &&
-        access(o->audio_bg, F_OK) != 0) {
+        access(o->audio_bg, F_OK) != 0)
+    {
         fprintf(stderr, "Audio background track not found: %s\n", o->audio_bg);
         return false;
     }
-    if (!isfinite(o->audio_main_vol) || o->audio_main_vol < 0.0) {
+    if (!isfinite(o->audio_main_vol) || o->audio_main_vol < 0.0)
+    {
         fprintf(stderr, "--audio-main-vol must be greater than or equal to zero.\n");
         return false;
     }
-    if (!isfinite(o->audio_bg_low) || o->audio_bg_low < 0.0) {
+    if (!isfinite(o->audio_bg_low) || o->audio_bg_low < 0.0)
+    {
         fprintf(stderr, "--audio-bg-low must be greater than or equal to zero.\n");
         return false;
     }
-    if (!isfinite(o->audio_bg_high) || o->audio_bg_high < 0.0) {
+    if (!isfinite(o->audio_bg_high) || o->audio_bg_high < 0.0)
+    {
         fprintf(stderr, "--audio-bg-high must be greater than or equal to zero.\n");
         return false;
     }
-    if (!isfinite(o->audio_fade) || o->audio_fade < 0.0) {
+    if (!isfinite(o->audio_fade) || o->audio_fade < 0.0)
+    {
         fprintf(stderr, "--audio-fade must be greater than or equal to zero.\n");
         return false;
     }
@@ -759,7 +869,8 @@ static bool validate_options(const VideoOptions *o)
 /* --- parallel batch rendering ------------------------------------------- */
 
 /* Shared state for rendering one batch of consecutive frames in parallel. */
-typedef struct {
+typedef struct
+{
     const FrameRenderer *renderer;
     const TourPlan *plan;
     int frame_count;
@@ -772,7 +883,8 @@ static void render_batch_one(void *context, int k)
     BatchContext *ctx = (BatchContext *)context;
     int index = ctx->start + k;
     int denominator = ctx->frame_count - 1;
-    if (denominator < 1) {
+    if (denominator < 1)
+    {
         denominator = 1;
     }
     double progress = (double)index / (double)denominator;
@@ -782,7 +894,8 @@ static void render_batch_one(void *context, int k)
 
 bool render_video(const VideoOptions *options)
 {
-    if (!validate_options(options)) {
+    if (!validate_options(options))
+    {
         return false;
     }
     const FormatSize *format = find_format(options->format);
@@ -790,18 +903,21 @@ bool render_video(const VideoOptions *options)
     int out_h = format->height;
 
     FrameRenderer renderer;
-    if (!create_frame_renderer(options->image, out_w, out_h, &renderer)) {
+    if (!create_frame_renderer(options->image, out_w, out_h, &renderer))
+    {
         return false;
     }
 
     char *ffmpeg_path = resolve_ffmpeg(options->ffmpeg);
-    if (ffmpeg_path == NULL) {
+    if (ffmpeg_path == NULL)
+    {
         free_frame_renderer(&renderer);
         return false;
     }
 
     int frame_count = (int)py_round(options->duration * options->fps);
-    if (frame_count < 1) {
+    if (frame_count < 1)
+    {
         frame_count = 1;
     }
 
@@ -827,7 +943,8 @@ bool render_video(const VideoOptions *options)
     snprintf(duration_arg, sizeof duration_arg, "%.6f", video_dur);
 
     ArgvBuilder argv;
-    if (!argv_init(&argv, 32)) {
+    if (!argv_init(&argv, 32))
+    {
         fprintf(stderr, "Out of memory building the ffmpeg command.\n");
         free(ffmpeg_path);
         free_frame_renderer(&renderer);
@@ -855,22 +972,26 @@ bool render_video(const VideoOptions *options)
     int bg_index = -1;
     int main_index = -1;
     int next_input = 1;
-    if (has_audio(options)) {
-        if (options->audio_bg != NULL && options->audio_bg[0] != '\0') {
+    if (has_audio(options))
+    {
+        if (options->audio_bg != NULL && options->audio_bg[0] != '\0')
+        {
             bg_index = next_input++;
             argv_ok = argv_ok && argv_push(&argv, "-stream_loop");
             argv_ok = argv_ok && argv_push(&argv, "-1");
             argv_ok = argv_ok && argv_push(&argv, "-i");
             argv_ok = argv_ok && argv_push(&argv, (char *)options->audio_bg);
         }
-        if (options->audio_main != NULL && options->audio_main[0] != '\0') {
+        if (options->audio_main != NULL && options->audio_main[0] != '\0')
+        {
             main_index = next_input++;
             argv_ok = argv_ok && argv_push(&argv, "-i");
             argv_ok = argv_ok && argv_push(&argv, (char *)options->audio_main);
         }
         if (argv_ok &&
             !build_audio_filter(options, ffmpeg_path, bg_index, main_index,
-                                video_dur, audio_filter, sizeof audio_filter)) {
+                                video_dur, audio_filter, sizeof audio_filter))
+        {
             argv_free(&argv);
             free(ffmpeg_path);
             free_frame_renderer(&renderer);
@@ -888,7 +1009,9 @@ bool render_video(const VideoOptions *options)
         argv_ok = argv_ok && argv_push(&argv, "aac");
         argv_ok = argv_ok && argv_push(&argv, "-b:a");
         argv_ok = argv_ok && argv_push(&argv, "192k");
-    } else {
+    }
+    else
+    {
         argv_ok = argv_ok && argv_push(&argv, "-an");
     }
 
@@ -903,7 +1026,8 @@ bool render_video(const VideoOptions *options)
     argv_ok = argv_ok && argv_push(&argv, "-movflags");
     argv_ok = argv_ok && argv_push(&argv, "+faststart");
     argv_ok = argv_ok && argv_push(&argv, (char *)options->out);
-    if (!argv_ok) {
+    if (!argv_ok)
+    {
         fprintf(stderr, "Out of memory building the ffmpeg command.\n");
         argv_free(&argv);
         free(ffmpeg_path);
@@ -917,7 +1041,8 @@ bool render_video(const VideoOptions *options)
     int write_fd = -1;
     pid_t pid = spawn_ffmpeg(argv.items, &write_fd);
     argv_free(&argv);
-    if (pid < 0) {
+    if (pid < 0)
+    {
         fprintf(stderr, "Could not start ffmpeg.\n");
         free(ffmpeg_path);
         free_frame_renderer(&renderer);
@@ -927,10 +1052,12 @@ bool render_video(const VideoOptions *options)
     /* Bound the frame pool: each frame buffer is large, so a few in flight is
        enough to keep ffmpeg fed without using excessive memory. */
     int batch = cpu_count();
-    if (batch > 4) {
+    if (batch > 4)
+    {
         batch = 4;
     }
-    if (batch < 1) {
+    if (batch < 1)
+    {
         batch = 1;
     }
 
@@ -938,26 +1065,32 @@ bool render_video(const VideoOptions *options)
     bool ok = frames != NULL;
     size_t frame_bytes = (size_t)out_w * out_h * 3;
     int progress_step = options->fps * 5;
-    if (progress_step < 1) {
+    if (progress_step < 1)
+    {
         progress_step = 1;
     }
 
-    for (int start = 0; ok && start < frame_count; start += batch) {
+    for (int start = 0; ok && start < frame_count; start += batch)
+    {
         int n = frame_count - start;
-        if (n > batch) {
+        if (n > batch)
+        {
             n = batch;
         }
         BatchContext ctx = {&renderer, &plan, frame_count, start, frames};
         parallel_for(n, batch, render_batch_one, &ctx);
 
-        for (int k = 0; k < n; ++k) {
-            if (frames[k] == NULL) {
+        for (int k = 0; k < n; ++k)
+        {
+            if (frames[k] == NULL)
+            {
                 fprintf(stderr, "Out of memory while rendering frame %d.\n",
                         start + k + 1);
                 ok = false;
                 break;
             }
-            if (!write_all(write_fd, frames[k]->data, frame_bytes)) {
+            if (!write_all(write_fd, frames[k]->data, frame_bytes))
+            {
                 fprintf(stderr, "ffmpeg stopped while receiving frames.\n");
                 image_free(frames[k]);
                 frames[k] = NULL;
@@ -965,7 +1098,8 @@ bool render_video(const VideoOptions *options)
                 break;
             }
             int index = start + k;
-            if (index % progress_step == 0) {
+            if (index % progress_step == 0)
+            {
                 fprintf(stderr, "Rendered frame %d/%d\n", index + 1, frame_count);
             }
             image_free(frames[k]);
@@ -973,14 +1107,17 @@ bool render_video(const VideoOptions *options)
         }
     }
 
-    if (frames != NULL) {
-        for (int k = 0; k < batch; ++k) {
+    if (frames != NULL)
+    {
+        for (int k = 0; k < batch; ++k)
+        {
             image_free(frames[k]);
         }
         free(frames);
     }
 
-    if (write_fd >= 0) {
+    if (write_fd >= 0)
+    {
         close(write_fd);
     }
     int status = 0;
@@ -989,11 +1126,13 @@ bool render_video(const VideoOptions *options)
     free(ffmpeg_path);
     free_frame_renderer(&renderer);
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+    {
         fprintf(stderr, "ffmpeg failed with exit code %d.\n", WEXITSTATUS(status));
         return false;
     }
-    if (!WIFEXITED(status)) {
+    if (!WIFEXITED(status))
+    {
         fprintf(stderr, "ffmpeg terminated abnormally.\n");
         return false;
     }

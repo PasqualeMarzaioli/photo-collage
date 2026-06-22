@@ -6,7 +6,6 @@
  * thin command-line wrapper around the shared video renderer.
  *
  * Author: Pasquale Marzaioli
- *     Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE
@@ -18,7 +17,8 @@
 
 #include "video_render.h"
 
-enum {
+enum
+{
     OPT_IMAGE = 1000,
     OPT_OUT,
     OPT_FORMAT,
@@ -72,7 +72,8 @@ static bool parse_int(const char *name, const char *text, long *out)
     char *end = NULL;
     errno = 0;
     long value = strtol(text, &end, 10);
-    if (end == text || *end != '\0' || errno != 0) {
+    if (end == text || *end != '\0' || errno != 0)
+    {
         fprintf(stderr, "Invalid integer for %s: %s\n", name, text);
         return false;
     }
@@ -85,7 +86,8 @@ static bool parse_double(const char *name, const char *text, double *out)
     char *end = NULL;
     errno = 0;
     double value = strtod(text, &end);
-    if (end == text || *end != '\0' || errno != 0) {
+    if (end == text || *end != '\0' || errno != 0)
+    {
         fprintf(stderr, "Invalid number for %s: %s\n", name, text);
         return false;
     }
@@ -142,62 +144,94 @@ int main(int argc, char **argv)
     int c;
     long iv;
     double dv;
-    while ((c = getopt_long(argc, argv, "", long_opts, NULL)) != -1) {
-        switch (c) {
-        case OPT_IMAGE: options.image = optarg; break;
-        case OPT_OUT: options.out = optarg; break;
-        case OPT_FORMAT: options.format = optarg; break;
+    while ((c = getopt_long(argc, argv, "", long_opts, NULL)) != -1)
+    {
+        switch (c)
+        {
+        case OPT_IMAGE:
+            options.image = optarg;
+            break;
+        case OPT_OUT:
+            options.out = optarg;
+            break;
+        case OPT_FORMAT:
+            options.format = optarg;
+            break;
         case OPT_DURATION:
-            if (!parse_double("--duration", optarg, &dv)) return 2;
+            if (!parse_double("--duration", optarg, &dv))
+                return 2;
             options.duration = dv;
             break;
         case OPT_FPS:
-            if (!parse_int("--fps", optarg, &iv)) return 2;
+            if (!parse_int("--fps", optarg, &iv))
+                return 2;
             options.fps = (int)iv;
             break;
         case OPT_CYCLES:
-            if (!parse_int("--cycles", optarg, &iv)) return 2;
+            if (!parse_int("--cycles", optarg, &iv))
+                return 2;
             options.cycles = (int)iv;
             break;
         case OPT_ZOOM:
-            if (!parse_double("--zoom", optarg, &dv)) return 2;
+            if (!parse_double("--zoom", optarg, &dv))
+                return 2;
             options.zoom = dv;
             break;
-        case OPT_FFMPEG: options.ffmpeg = optarg; break;
+        case OPT_FFMPEG:
+            options.ffmpeg = optarg;
+            break;
         case OPT_CRF:
-            if (!parse_int("--crf", optarg, &iv)) return 2;
+            if (!parse_int("--crf", optarg, &iv))
+                return 2;
             options.crf = (int)iv;
             break;
-        case OPT_PRESET: options.preset = optarg; break;
-        case OPT_TOUR: options.tour = optarg; break;
+        case OPT_PRESET:
+            options.preset = optarg;
+            break;
+        case OPT_TOUR:
+            options.tour = optarg;
+            break;
         case OPT_PAN_SPEED:
-            if (!parse_double("--pan-speed", optarg, &dv)) return 2;
+            if (!parse_double("--pan-speed", optarg, &dv))
+                return 2;
             options.pan_speed = dv;
             break;
-        case OPT_AUDIO_MAIN: options.audio_main = optarg; break;
-        case OPT_AUDIO_BG: options.audio_bg = optarg; break;
+        case OPT_AUDIO_MAIN:
+            options.audio_main = optarg;
+            break;
+        case OPT_AUDIO_BG:
+            options.audio_bg = optarg;
+            break;
         case OPT_AUDIO_MAIN_VOL:
-            if (!parse_double("--audio-main-vol", optarg, &dv)) return 2;
+            if (!parse_double("--audio-main-vol", optarg, &dv))
+                return 2;
             options.audio_main_vol = dv;
             break;
         case OPT_AUDIO_BG_LOW:
-            if (!parse_double("--audio-bg-low", optarg, &dv)) return 2;
+            if (!parse_double("--audio-bg-low", optarg, &dv))
+                return 2;
             options.audio_bg_low = dv;
             break;
         case OPT_AUDIO_BG_HIGH:
-            if (!parse_double("--audio-bg-high", optarg, &dv)) return 2;
+            if (!parse_double("--audio-bg-high", optarg, &dv))
+                return 2;
             options.audio_bg_high = dv;
             break;
         case OPT_AUDIO_FADE:
-            if (!parse_double("--audio-fade", optarg, &dv)) return 2;
+            if (!parse_double("--audio-fade", optarg, &dv))
+                return 2;
             options.audio_fade = dv;
             break;
-        case OPT_HELP: print_usage(); return 0;
-        default: return 2;
+        case OPT_HELP:
+            print_usage();
+            return 0;
+        default:
+            return 2;
         }
     }
 
-    if (options.image == NULL) {
+    if (options.image == NULL)
+    {
         fprintf(stderr, "--image is required.\n");
         return 1;
     }
