@@ -81,6 +81,12 @@ static const double kCoverAnchors[][2] = {
 };
 static const int kCoverAnchorCount = (int)(sizeof(kCoverAnchors) / sizeof(kCoverAnchors[0]));
 
+static const double kOpeningHoldSeconds = 2.0;
+static const double kZoomInEndProgress = 0.20;
+static const double kCloseStartProgress = 0.92;
+static const double kMinZoomInSeconds = 1.0;
+static const double kMinPhaseGap = 1e-6;
+
 /* One frame's camera mode, normalised centre, and crop zoom. */
 typedef struct
 {
@@ -89,6 +95,14 @@ typedef struct
     double cy;
     double zoom;
 } CameraState;
+
+/* Normalised timeline boundaries for the camera movement phases. */
+typedef struct
+{
+    double open_hold;
+    double zoom_in_end;
+    double close_start;
+} CameraPhases;
 
 /* The active tour: which anchor set to wander, how many segments to cross, and
    how fast. base_segments is the number of anchor-to-anchor hops spread across
@@ -140,6 +154,16 @@ static double smoothstep(double value)
     return x * x * (3.0 - 2.0 * x);
 }
 
+/*
+ * Apply quintic easing to a normalised value. Returns 0 at the start, 1 at the
+ * end, and keeps both velocity and acceleration continuous at the endpoints.
+ */
+static double smootherstep(double value)
+{
+    double x = clampd(value, 0.0, 1.0);
+    return x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+}
+
 static double lerp(double start, double end, double amount)
 {
     return start + (end - start) * amount;
@@ -155,6 +179,48 @@ static CameraState make_state(int contain, double cx, double cy, double zoom)
     return state;
 }
 
+/*
+ * Compute normalised camera phase boundaries for the timeline duration.
+ * Returns a two-second opening hold for normal videos, with short videos
+ * compressed only enough to preserve a usable zoom-in before the closing pull.
+ */
+static CameraPhases camera_phase_points(double timeline_duration)
+{
+    double duration = timeline_duration > kMinPhaseGap
+                          ? timeline_duration
+                          : kMinPhaseGap;
+    double min_zoom_progress = kMinZoomInSeconds / duration;
+    double max_open_hold = kCloseStartProgress - min_zoom_progress;
+    CameraPhases phases;
+
+    if (max_open_hold < 0.0)
+    {
+        max_open_hold = 0.0;
+    }
+
+    phases.open_hold = clampd(
+        kOpeningHoldSeconds / duration, 0.0, max_open_hold);
+    phases.zoom_in_end = kZoomInEndProgress;
+    if (phases.zoom_in_end < phases.open_hold + min_zoom_progress)
+    {
+        phases.zoom_in_end = phases.open_hold + min_zoom_progress;
+    }
+    if (phases.zoom_in_end > kCloseStartProgress - kMinPhaseGap)
+    {
+        phases.zoom_in_end = kCloseStartProgress - kMinPhaseGap;
+    }
+    if (phases.zoom_in_end <= phases.open_hold)
+    {
+        phases.zoom_in_end = phases.open_hold + kMinPhaseGap;
+        if (phases.zoom_in_end > kCloseStartProgress)
+        {
+            phases.zoom_in_end = kCloseStartProgress;
+        }
+    }
+    phases.close_start = kCloseStartProgress;
+    return phases;
+}
+
 /* --- camera path -------------------------------------------------------- */
 
 /*
@@ -163,35 +229,38 @@ static CameraState make_state(int contain, double cx, double cy, double zoom)
  * across the tour anchors, and a final pull-back to the full collage. The pan
  * traverses `base_segments` hops at pan_speed 1.0; a higher pan_speed moves the
  * camera faster (and loops over the anchors), showing more photos in the time.
+ * `timeline_duration` controls the absolute two-second opening hold.
  */
-static CameraState get_camera_state(double progress, const TourPlan *plan)
+static CameraState get_camera_state(double progress, double timeline_duration,
+                                    const TourPlan *plan)
 {
-    const double open_hold = 0.075;
-    const double zoom_in_end = 0.20;
-    const double close_start = 0.92;
+    CameraPhases phases = camera_phase_points(timeline_duration);
     double tour_zoom = plan->max_zoom > 1.05 ? plan->max_zoom : 1.05;
     const double (*anchors)[2] = plan->anchors;
     int n = plan->anchor_count;
     int base = plan->base_segments > 1 ? plan->base_segments : 1;
     double speed = plan->pan_speed > 0.0 ? plan->pan_speed : 1.0;
 
-    if (progress <= open_hold)
+    if (progress < phases.open_hold)
     {
         return make_state(1, 0.5, 0.5, 1.0);
     }
 
-    if (progress < zoom_in_end)
+    if (progress < phases.zoom_in_end)
     {
-        double amount = smoothstep((progress - open_hold) / (zoom_in_end - open_hold));
+        double zoom_range = phases.zoom_in_end - phases.open_hold;
+        double amount = smootherstep(
+            (progress - phases.open_hold) / zoom_range);
         double cx = lerp(0.5, anchors[1][0], amount);
         double cy = lerp(0.5, anchors[1][1], amount);
-        double zoom = lerp(1.05, tour_zoom, amount);
+        double zoom = lerp(1.0, tour_zoom, amount);
         return make_state(0, cx, cy, zoom);
     }
 
-    if (progress >= close_start)
+    if (progress >= phases.close_start)
     {
-        double amount = smoothstep((progress - close_start) / (1.0 - close_start));
+        double amount = smootherstep(
+            (progress - phases.close_start) / (1.0 - phases.close_start));
         /* Continue the pull-back from wherever the tour ended (no jump). */
         int last_seg = (int)(base * speed);
         int si = (last_seg + 1) % n;
@@ -205,7 +274,8 @@ static CameraState get_camera_state(double progress, const TourPlan *plan)
         return make_state(0, cx, cy, zoom);
     }
 
-    double tour_progress = (progress - zoom_in_end) / (close_start - zoom_in_end);
+    double tour_progress = (progress - phases.zoom_in_end) /
+                           (phases.close_start - phases.zoom_in_end);
     double segment_pos = tour_progress * base * speed;
     int segment_index = (int)segment_pos;
     double segment_progress = smoothstep(segment_pos - segment_index);
@@ -874,6 +944,7 @@ typedef struct
     const FrameRenderer *renderer;
     const TourPlan *plan;
     int frame_count;
+    double timeline_duration;
     int start;
     Image **frames;
 } BatchContext;
@@ -888,7 +959,8 @@ static void render_batch_one(void *context, int k)
         denominator = 1;
     }
     double progress = (double)index / (double)denominator;
-    CameraState state = get_camera_state(progress, ctx->plan);
+    CameraState state = get_camera_state(
+        progress, ctx->timeline_duration, ctx->plan);
     ctx->frames[k] = render_frame(ctx->renderer, &state);
 }
 
@@ -920,6 +992,9 @@ bool render_video(const VideoOptions *options)
     {
         frame_count = 1;
     }
+    double timeline_duration = frame_count > 1
+                                   ? (double)(frame_count - 1) / (double)options->fps
+                                   : 1.0 / (double)options->fps;
 
     /* Pick the tour: "cover" wanders all the spread-out anchors to show as many
        photos as possible; "classic" uses the sparse original path. */
@@ -1077,7 +1152,8 @@ bool render_video(const VideoOptions *options)
         {
             n = batch;
         }
-        BatchContext ctx = {&renderer, &plan, frame_count, start, frames};
+        BatchContext ctx = {
+            &renderer, &plan, frame_count, timeline_duration, start, frames};
         parallel_for(n, batch, render_batch_one, &ctx);
 
         for (int k = 0; k < n; ++k)

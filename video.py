@@ -55,6 +55,12 @@ COVER_ANCHORS: tuple[tuple[float, float], ...] = (
     (0.38, 0.84), (0.62, 0.88), (0.50, 0.50),
 )
 
+OPENING_HOLD_SECONDS = 2.0
+ZOOM_IN_END_PROGRESS = 0.20
+CLOSE_START_PROGRESS = 0.92
+MIN_ZOOM_IN_SECONDS = 1.0
+MIN_PHASE_GAP = 1e-6
+
 
 class VideoError(Exception):
     """Raised when video rendering cannot continue with the given inputs."""
@@ -127,6 +133,13 @@ def smoothstep(value: float) -> float:
     return x * x * (3.0 - 2.0 * x)
 
 
+def smootherstep(value: float) -> float:
+    """Apply quintic easing to a normalized value for jerk-free endpoints."""
+
+    x = clamp(value, 0.0, 1.0)
+    return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+
+
 def lerp(start: float, end: float, amount: float) -> float:
     """Interpolate between two floats using a normalized amount."""
 
@@ -139,6 +152,24 @@ def lerp_point(
     """Interpolate between two normalized two-dimensional points."""
 
     return (lerp(start[0], end[0], amount), lerp(start[1], end[1], amount))
+
+
+def camera_phase_points(timeline_duration: float) -> tuple[float, float, float]:
+    """Return normalized phase boundaries for the camera timeline.
+
+    The opening hold is exactly two seconds on normal-length videos. Very short
+    videos compress the hold only enough to keep a usable zoom-in before close.
+    """
+
+    duration = max(timeline_duration, MIN_PHASE_GAP)
+    min_zoom_progress = MIN_ZOOM_IN_SECONDS / duration
+    max_open_hold = max(0.0, CLOSE_START_PROGRESS - min_zoom_progress)
+    open_hold = clamp(OPENING_HOLD_SECONDS / duration, 0.0, max_open_hold)
+    zoom_in_end = max(ZOOM_IN_END_PROGRESS, open_hold + min_zoom_progress)
+    zoom_in_end = min(zoom_in_end, CLOSE_START_PROGRESS - MIN_PHASE_GAP)
+    if zoom_in_end <= open_hold:
+        zoom_in_end = min(CLOSE_START_PROGRESS, open_hold + MIN_PHASE_GAP)
+    return open_hold, zoom_in_end, CLOSE_START_PROGRESS
 
 
 def load_json_config(path: Path) -> dict[str, Any]:
@@ -365,34 +396,36 @@ def create_frame_renderer(image_path: Path, output_size: tuple[int, int]) -> Fra
     )
 
 
-def get_camera_state(progress: float, plan: TourPlan) -> CameraState:
+def get_camera_state(
+    progress: float, timeline_duration: float, plan: TourPlan
+) -> CameraState:
     """Return the deterministic camera state for a normalized render progress.
 
     The path opens on the full collage, zooms in once, pans across the tour
     anchors for `base_segments` hops (scaled by `pan_speed`, looping over the
-    anchors when faster), and pulls back out at the end.
+    anchors when faster), and pulls back out at the end. `timeline_duration`
+    controls the absolute two-second opening hold.
     """
 
-    open_hold = 0.075
-    zoom_in_end = 0.20
-    close_start = 0.92
+    open_hold, zoom_in_end, close_start = camera_phase_points(timeline_duration)
     tour_zoom = max(1.05, plan.max_zoom)
     anchors = plan.anchors
     count = len(anchors)
     base = max(1, plan.base_segments)
     speed = plan.pan_speed if plan.pan_speed > 0.0 else 1.0
 
-    if progress <= open_hold:
+    if progress < open_hold:
         return CameraState("contain", 0.5, 0.5, 1.0)
 
     if progress < zoom_in_end:
-        amount = smoothstep((progress - open_hold) / (zoom_in_end - open_hold))
+        amount = smootherstep(
+            (progress - open_hold) / (zoom_in_end - open_hold))
         center = lerp_point((0.5, 0.5), anchors[1], amount)
-        zoom = lerp(1.05, tour_zoom, amount)
+        zoom = lerp(1.0, tour_zoom, amount)
         return CameraState("crop", center[0], center[1], zoom)
 
     if progress >= close_start:
-        amount = smoothstep((progress - close_start) / (1.0 - close_start))
+        amount = smootherstep((progress - close_start) / (1.0 - close_start))
         # Continue the pull-back from wherever the tour ended (no jump).
         last_segment = int(base * speed)
         start = anchors[(last_segment + 1) % count]
@@ -510,6 +543,7 @@ def render_video(options: VideoOptions) -> None:
     ffmpeg_path = resolve_ffmpeg(options.ffmpeg)
     frame_count = max(1, int(round(options.duration * options.fps)))
     video_dur = frame_count / options.fps
+    timeline_duration = max((frame_count - 1) / options.fps, 1.0 / options.fps)
     tour_plan = build_tour_plan(options)
     options.out.parent.mkdir(parents=True, exist_ok=True)
     audio_args = build_audio_ffmpeg_args(options, video_dur)
@@ -556,7 +590,7 @@ def render_video(options: VideoOptions) -> None:
     try:
         for frame_index in range(frame_count):
             progress = frame_index / max(1, frame_count - 1)
-            state = get_camera_state(progress, tour_plan)
+            state = get_camera_state(progress, timeline_duration, tour_plan)
             frame = render_frame(renderer, state)
             process.stdin.write(frame.convert("RGB").tobytes())
             if frame_index % max(1, options.fps * 5) == 0:
