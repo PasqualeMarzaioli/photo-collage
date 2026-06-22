@@ -5,7 +5,7 @@
  * with a smooth zoom-and-pan path, and encodes the result as an MP4. It is a
  * thin command-line wrapper around the shared video renderer.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  *     Pasquale Marzaioli
  */
 

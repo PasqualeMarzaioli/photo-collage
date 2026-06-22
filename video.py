@@ -4,7 +4,7 @@
 This program takes a rendered collage, moves a vertical 9:16 camera over it with
 a smooth zoom-and-pan path, and encodes the result as an MP4.
 
-Authors:
+Author: Pasquale Marzaioli
     Pasquale Marzaioli
 """
 

@@ -9,7 +9,7 @@
  * All colour images use three interleaved 8-bit channels (RGB), matching
  * Pillow's convert("RGB"). Alpha masks use a single 8-bit channel.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  */
 
 #ifndef IMAGE_H

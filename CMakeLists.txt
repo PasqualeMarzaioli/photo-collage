@@ -9,7 +9,7 @@
 # the standard threading package. The stb single-header libraries live in
 # third_party/ and need no installation.
 #
-# Authors:
+# Author: Pasquale Marzaioli
 
 cmake_minimum_required(VERSION 3.16)
 project(collage_tools C)

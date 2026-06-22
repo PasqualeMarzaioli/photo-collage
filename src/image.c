@@ -6,7 +6,7 @@
  * WebP. Resampling, blur, blending, masks, and compositing are implemented
  * here so the result matches the Pillow-based Python version.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE

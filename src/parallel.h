@@ -6,7 +6,7 @@
  * a fixed number of indices across a small set of worker threads, each pulling
  * the next index from a shared atomic counter.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  */
 
 #ifndef PARALLEL_H

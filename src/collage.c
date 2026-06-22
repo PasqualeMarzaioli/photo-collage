@@ -5,7 +5,7 @@
  * exactly once into a connected vertical 9:16 collage, and can optionally render
  * a zoom-tour video from the generated collage.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  *     Pasquale Marzaioli
  */
 

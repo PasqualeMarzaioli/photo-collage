@@ -6,7 +6,7 @@
  * for H.264 encoding. It is shared by both executables: the standalone `video`
  * tool and the `--video` option of the `collage` tool.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  *     Pasquale Marzaioli
  */
 

@@ -1,7 +1,7 @@
 /*
  * POSIX threads implementation of the parallel-for helper.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  */
 
 #define _GNU_SOURCE

@@ -7,7 +7,7 @@
  * written to ffmpeg in order through a pipe, so encoding overlaps rendering
  * while the output stream stays sequential.
  *
- * Authors:
+ * Author: Pasquale Marzaioli
  *     Pasquale Marzaioli
  */
 
