@@ -6,7 +6,6 @@ exactly once into a connected vertical collage, and can optionally render a
 zoom-tour video from the generated collage.
 
 Author: Pasquale Marzaioli
-    Pasquale Marzaioli
 """
 
 from __future__ import annotations
