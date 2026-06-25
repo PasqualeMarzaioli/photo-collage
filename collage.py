@@ -94,6 +94,7 @@ class CollageOptions:
     audio_bg_low: float
     audio_bg_high: float
     audio_fade: float
+    audio_main_start: float | None
 
 
 def parse_color(value: str | Iterable[int]) -> tuple[int, int, int]:
@@ -361,6 +362,7 @@ def render_optional_video(options: CollageOptions, image_path: Path) -> None:
                 audio_bg_low=options.audio_bg_low,
                 audio_bg_high=options.audio_bg_high,
                 audio_fade=options.audio_fade,
+                audio_main_start=options.audio_main_start,
             )
         )
     except Exception as exc:
@@ -427,6 +429,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Background gain after the main track ends.")
     parser.add_argument("--audio-fade", type=float, default=1.5,
                         help="Audio rise and ending fade length in seconds.")
+    parser.add_argument("--audio-main-start", type=float,
+                        help="Main audio start time in seconds for --video.")
     return parser.parse_args(argv)
 
 
@@ -464,6 +468,7 @@ def options_from_args(args: argparse.Namespace) -> CollageOptions:
         audio_bg_low=args.audio_bg_low,
         audio_bg_high=args.audio_bg_high,
         audio_fade=args.audio_fade,
+        audio_main_start=args.audio_main_start,
     )
 
 

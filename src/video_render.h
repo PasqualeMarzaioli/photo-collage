@@ -35,6 +35,7 @@ typedef struct
     double audio_bg_low;    /* background gain while main plays */
     double audio_bg_high;   /* background gain after main ends */
     double audio_fade;      /* rise and ending fade length in seconds */
+    double audio_main_start; /* main start seconds, or -1.0 for automatic */
 } VideoOptions;
 
 /*

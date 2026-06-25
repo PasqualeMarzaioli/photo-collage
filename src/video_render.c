@@ -691,12 +691,29 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
                                int bg_index, int main_index, double video_dur,
                                char *buffer, size_t buffer_size)
 {
-    double main_end = 0.0;
+    double main_duration = 0.0;
     if (main_index >= 0 &&
-        !probe_duration(ffmpeg, options->audio_main, &main_end))
+        !probe_duration(ffmpeg, options->audio_main, &main_duration))
     {
         return false;
     }
+
+    double main_start = options->audio_main_start >= 0.0 ? options->audio_main_start : 0.0;
+    if (main_index >= 0 && bg_index >= 0 && options->audio_main_start < 0.0)
+    {
+        double bg_duration = 0.0;
+        if (!probe_duration(ffmpeg, options->audio_bg, &bg_duration))
+        {
+            return false;
+        }
+        main_start = (bg_duration - main_duration) / 2.0;
+        if (main_start < 0.0)
+        {
+            main_start = 0.0;
+        }
+    }
+    double main_end = main_start + main_duration;
+    long long main_delay_ms = (long long)(main_start * 1000.0 + 0.5);
 
     double fade = options->audio_fade;
     double fade_start = video_dur - fade;
@@ -712,12 +729,13 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
         {
             written = snprintf(
                 buffer, buffer_size,
-                "[%d:a]volume=%.6f[am];"
-                "[%d:a]volume='%.6f+(%.6f-%.6f)*clip((t-%.6f)/%.6f\\,0\\,1)':eval=frame[bg];"
+                "[%d:a]volume=%.6f,adelay=%lld:all=1[am];"
+                "[%d:a]volume='if(lt(t\\,%.6f)\\,%.6f\\,%.6f+(%.6f-%.6f)*clip((t-%.6f)/%.6f\\,0\\,1))':eval=frame[bg];"
                 "[am][bg]amix=inputs=2:duration=longest:normalize=0[mix];"
                 "[mix]afade=t=out:st=%.6f:d=%.6f[aout]",
-                main_index, options->audio_main_vol,
-                bg_index, options->audio_bg_low, options->audio_bg_high,
+                main_index, options->audio_main_vol, main_delay_ms,
+                bg_index, main_start, options->audio_bg_high,
+                options->audio_bg_low, options->audio_bg_high,
                 options->audio_bg_low, main_end, fade,
                 fade_start, fade);
         }
@@ -725,12 +743,13 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
         {
             written = snprintf(
                 buffer, buffer_size,
-                "[%d:a]volume=%.6f[am];"
-                "[%d:a]volume='%.6f+(%.6f-%.6f)*gte(t\\,%.6f)':eval=frame[bg];"
+                "[%d:a]volume=%.6f,adelay=%lld:all=1[am];"
+                "[%d:a]volume='if(lt(t\\,%.6f)\\,%.6f\\,%.6f+(%.6f-%.6f)*gte(t\\,%.6f))':eval=frame[bg];"
                 "[am][bg]amix=inputs=2:duration=longest:normalize=0[mix];"
                 "[mix]anull[aout]",
-                main_index, options->audio_main_vol,
-                bg_index, options->audio_bg_low, options->audio_bg_high,
+                main_index, options->audio_main_vol, main_delay_ms,
+                bg_index, main_start, options->audio_bg_high,
+                options->audio_bg_low, options->audio_bg_high,
                 options->audio_bg_low, main_end);
         }
     }
@@ -740,16 +759,16 @@ static bool build_audio_filter(const VideoOptions *options, const char *ffmpeg,
         {
             written = snprintf(
                 buffer, buffer_size,
-                "[%d:a]volume=%.6f[am];"
+                "[%d:a]volume=%.6f,adelay=%lld:all=1[am];"
                 "[am]afade=t=out:st=%.6f:d=%.6f[aout]",
-                main_index, options->audio_main_vol, fade_start, fade);
+                main_index, options->audio_main_vol, main_delay_ms, fade_start, fade);
         }
         else
         {
             written = snprintf(
                 buffer, buffer_size,
-                "[%d:a]volume=%.6f[am];[am]anull[aout]",
-                main_index, options->audio_main_vol);
+                "[%d:a]volume=%.6f,adelay=%lld:all=1[am];[am]anull[aout]",
+                main_index, options->audio_main_vol, main_delay_ms);
         }
     }
     else if (bg_index >= 0)
@@ -931,6 +950,12 @@ static bool validate_options(const VideoOptions *o)
     if (!isfinite(o->audio_fade) || o->audio_fade < 0.0)
     {
         fprintf(stderr, "--audio-fade must be greater than or equal to zero.\n");
+        return false;
+    }
+    if (!isfinite(o->audio_main_start) ||
+        (o->audio_main_start < 0.0 && o->audio_main_start != -1.0))
+    {
+        fprintf(stderr, "--audio-main-start must be greater than or equal to zero.\n");
         return false;
     }
     return true;

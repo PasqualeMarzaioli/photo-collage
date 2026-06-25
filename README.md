@@ -219,6 +219,20 @@ The exact file names are your choice. Use the same paths in the command:
 Audio is optional. If you do not pass `--audio-main` or `--audio-bg`, the video
 is silent, exactly like the original version of this tool.
 
+When both tracks are present, the background starts immediately. By default, the
+main track is centered inside the background track:
+
+```text
+main start = (background duration - main duration) / 2
+```
+
+For example, with a 2-minute background and a 1-minute 30-second main track, the
+main track starts after 15 seconds. To choose the start time yourself, add:
+
+```bash
+--audio-main-start 15
+```
+
 Local audio files are ignored by git, so you can keep personal tracks in
 `audio/` without accidentally committing them.
 
@@ -403,6 +417,16 @@ main track, then rises after the main track ends:
 .venv/bin/python video.py --image collage.png --out tour-audio.mp4 \
   --format reel --duration 50 \
   --audio-main audio/audio.m4a --audio-bg audio/background.mov
+```
+
+To force the main track to start after a specific number of seconds, add
+`--audio-main-start`:
+
+```bash
+.venv/bin/python video.py --image collage.png --out tour-audio.mp4 \
+  --format reel --duration 50 \
+  --audio-main audio/audio.m4a --audio-bg audio/background.mov \
+  --audio-main-start 15
 ```
 
 ### Windows PowerShell
@@ -703,6 +727,7 @@ command, for example:
 | `--audio-bg-low F` | Background gain while the main track plays | `0.15` |
 | `--audio-bg-high F` | Background gain after the main track ends | `1.0` |
 | `--audio-fade F` | Rise and ending fade length in seconds | `1.5` |
+| `--audio-main-start S` | Main track start time in seconds; omit for automatic centering | auto |
 
 When you generate the video together with the collage (`collage … --video`), the
 video tuning options `--duration`, `--fps`, `--cycles`, `--zoom`, `--tour`, and

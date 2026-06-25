@@ -61,6 +61,7 @@ typedef struct
     double audio_bg_low;
     double audio_bg_high;
     double audio_fade;
+    double audio_main_start;
 } CollageOptions;
 
 /* Final canvas and no-repeat row layout in output pixels. */
@@ -505,6 +506,7 @@ static bool render_optional_video(const CollageOptions *options)
         .audio_bg_low = options->audio_bg_low,
         .audio_bg_high = options->audio_bg_high,
         .audio_fade = options->audio_fade,
+        .audio_main_start = options->audio_main_start,
     };
     if (!render_video(&video))
     {
@@ -611,6 +613,7 @@ enum
     OPT_AUDIO_BG_LOW,
     OPT_AUDIO_BG_HIGH,
     OPT_AUDIO_FADE,
+    OPT_AUDIO_MAIN_START,
     OPT_HELP,
 };
 
@@ -645,7 +648,8 @@ static void print_usage(void)
             "  --audio-main-vol F Main track gain for --video (default: 1.0)\n"
             "  --audio-bg-low F   Background gain while main plays (default: 0.15)\n"
             "  --audio-bg-high F  Background gain after main ends (default: 1.0)\n"
-            "  --audio-fade F     Audio rise and ending fade seconds (default: 1.5)\n");
+            "  --audio-fade F     Audio rise and ending fade seconds (default: 1.5)\n"
+            "  --audio-main-start S Main audio start seconds for --video (default: auto)\n");
 }
 
 /* Parse an integer option value; on error print a message and return false. */
@@ -707,6 +711,7 @@ int main(int argc, char **argv)
     options.audio_bg_low = 0.15;
     options.audio_bg_high = 1.0;
     options.audio_fade = 1.5;
+    options.audio_main_start = -1.0;
 
     int width_arg = -1;     /* unset */
     double scale_arg = NAN; /* unset */
@@ -739,6 +744,7 @@ int main(int argc, char **argv)
         {"audio-bg-low", required_argument, 0, OPT_AUDIO_BG_LOW},
         {"audio-bg-high", required_argument, 0, OPT_AUDIO_BG_HIGH},
         {"audio-fade", required_argument, 0, OPT_AUDIO_FADE},
+        {"audio-main-start", required_argument, 0, OPT_AUDIO_MAIN_START},
         {"help", no_argument, 0, OPT_HELP},
         {0, 0, 0, 0},
     };
@@ -855,6 +861,16 @@ int main(int argc, char **argv)
             if (!parse_double("--audio-fade", optarg, &dv))
                 return 2;
             options.audio_fade = dv;
+            break;
+        case OPT_AUDIO_MAIN_START:
+            if (!parse_double("--audio-main-start", optarg, &dv))
+                return 2;
+            if (dv < 0.0)
+            {
+                fprintf(stderr, "--audio-main-start must be greater than or equal to zero.\n");
+                return 2;
+            }
+            options.audio_main_start = dv;
             break;
         case OPT_HELP:
             print_usage();

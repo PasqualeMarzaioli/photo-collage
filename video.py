@@ -98,6 +98,7 @@ class VideoOptions:
     audio_bg_low: float
     audio_bg_high: float
     audio_fade: float
+    audio_main_start: float | None
 
 
 @dataclass(frozen=True)
@@ -275,6 +276,18 @@ def format_ffmpeg_number(value: float) -> str:
     return text if text else "0"
 
 
+def resolve_audio_main_start(
+    options: VideoOptions, main_duration: float, bg_duration: float | None
+) -> float:
+    """Return the main-track start time in seconds."""
+
+    if options.audio_main_start is not None:
+        return options.audio_main_start
+    if bg_duration is None:
+        return 0.0
+    return max(0.0, (bg_duration - main_duration) / 2.0)
+
+
 def build_audio_ffmpeg_args(options: VideoOptions, video_dur: float) -> list[str]:
     """Build ffmpeg input, filter, and output arguments for optional audio."""
 
@@ -291,11 +304,22 @@ def build_audio_ffmpeg_args(options: VideoOptions, video_dur: float) -> list[str
         bg_index = input_index
         input_index += 1
 
-    main_end = 0.0
+    main_duration = 0.0
     if options.audio_main is not None:
         args.extend(["-i", str(options.audio_main)])
         main_index = input_index
-        main_end = probe_audio_duration(options.ffmpeg, options.audio_main)
+        main_duration = probe_audio_duration(options.ffmpeg, options.audio_main)
+
+    bg_duration: float | None = None
+    if (
+        options.audio_bg is not None
+        and options.audio_main is not None
+        and options.audio_main_start is None
+    ):
+        bg_duration = probe_audio_duration(options.ffmpeg, options.audio_bg)
+
+    main_start = resolve_audio_main_start(options, main_duration, bg_duration)
+    main_end = main_start + main_duration
 
     fade = options.audio_fade
     fade_start = max(0.0, video_dur - fade)
@@ -304,26 +328,36 @@ def build_audio_ffmpeg_args(options: VideoOptions, video_dur: float) -> list[str
     main_vol = format_ffmpeg_number(options.audio_main_vol)
     bg_low = format_ffmpeg_number(options.audio_bg_low)
     bg_high = format_ffmpeg_number(options.audio_bg_high)
+    main_start_text = format_ffmpeg_number(main_start)
     main_end_text = format_ffmpeg_number(main_end)
     fade_text = format_ffmpeg_number(fade)
     video_dur_text = format_ffmpeg_number(video_dur)
     fade_start_text = format_ffmpeg_number(fade_start)
+    main_delay_ms = max(0, int(round(main_start * 1000.0)))
 
     if main_index is not None and bg_index is not None:
-        filters.append(f"[{main_index}:a]volume={main_vol}[am]")
+        filters.append(
+            f"[{main_index}:a]volume={main_vol},adelay={main_delay_ms}:all=1[am]"
+        )
         if fade > 0.0:
             ramp = (
+                f"if(lt(t\\,{main_start_text})\\,{bg_high}\\,"
                 f"{bg_low}+({bg_high}-{bg_low})*"
-                f"clip((t-{main_end_text})/{fade_text}\\,0\\,1)"
+                f"clip((t-{main_end_text})/{fade_text}\\,0\\,1))"
             )
         else:
-            ramp = f"{bg_low}+({bg_high}-{bg_low})*gte(t\\,{main_end_text})"
+            ramp = (
+                f"if(lt(t\\,{main_start_text})\\,{bg_high}\\,"
+                f"{bg_low}+({bg_high}-{bg_low})*gte(t\\,{main_end_text}))"
+            )
         filters.append(f"[{bg_index}:a]volume='{ramp}':eval=frame[bg]")
         filters.append(
             "[am][bg]amix=inputs=2:duration=longest:normalize=0[mix]")
         final_label = "mix"
     elif main_index is not None:
-        filters.append(f"[{main_index}:a]volume={main_vol}[am]")
+        filters.append(
+            f"[{main_index}:a]volume={main_vol},adelay={main_delay_ms}:all=1[am]"
+        )
         final_label = "am"
     elif bg_index is not None:
         filters.append(f"[{bg_index}:a]volume={bg_high}[bg]")
@@ -519,6 +553,10 @@ def validate_options(options: VideoOptions) -> None:
     ):
         if not math.isfinite(value) or value < 0.0:
             raise VideoError(f"{name} must be greater than or equal to zero.")
+    if options.audio_main_start is not None and (
+        not math.isfinite(options.audio_main_start) or options.audio_main_start < 0.0
+    ):
+        raise VideoError("--audio-main-start must be greater than or equal to zero.")
 
 
 def build_tour_plan(options: VideoOptions) -> TourPlan:
@@ -654,6 +692,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Background gain after the main track ends.")
     parser.add_argument("--audio-fade", type=float,
                         help="Audio rise and ending fade length in seconds.")
+    parser.add_argument("--audio-main-start", type=float,
+                        help="Main audio start time in seconds.")
     return parser.parse_args(argv)
 
 
@@ -723,6 +763,17 @@ def options_from_args(args: argparse.Namespace) -> VideoOptions:
         if args.audio_fade is not None
         else float(video_config.get(
             "audioFade", video_config.get("audio_fade", 1.5))),
+        audio_main_start=args.audio_main_start
+        if args.audio_main_start is not None
+        else (
+            float(video_config["audioMainStart"])
+            if "audioMainStart" in video_config
+            else (
+                float(video_config["audio_main_start"])
+                if "audio_main_start" in video_config
+                else None
+            )
+        ),
     )
 
 
